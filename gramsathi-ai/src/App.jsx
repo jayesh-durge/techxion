@@ -84,14 +84,35 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, thinking]);
 
-  /* Build Ollama prompt */
-  const buildPrompt = (query) => {
-    const langLabel = { hi: 'हिंदी', mr: 'मराठी', en: 'English' }[lang] || 'हिंदी';
-    const ctx = findAnswer(query, moduleId, lang);
-    return `You are GramSathi AI, a helpful assistant for rural India. Reply in ${langLabel} language only. Be clear and simple. Keep response under 250 words.\n\nContext knowledge:\n${ctx?.text || ''}\n\nUser question: ${query}\n\nAnswer:`;
-  };
+  /* ── Backend TTS: Microsoft Neural Voice via edge-tts ── */
+  const audioRef = useRef(null);
+  const speakBackend = useCallback(async (text, idx) => {
+    try {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      const gender = ['dadi','doctor'].includes(voiceAgent) ? 'female' : 'male';
+      const url = `/api/tts?text=${encodeURIComponent(text.substring(0, 550))}&lang=${lang}&gender=${gender}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error('TTS backend unavailable');
+      const blob = await res.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audioRef.current = audio;
+      setSpeaking(idx);
+      audio.onended = () => setSpeaking(null);
+      audio.onerror = () => { setSpeaking(null); speakWithAgent(text, voices, lang, voiceAgent, () => setSpeaking(idx), () => setSpeaking(null)); };
+      audio.play();
+    } catch {
+      // Fallback to browser synthesis
+      speakWithAgent(text, voices, lang, voiceAgent, () => setSpeaking(idx), () => setSpeaking(null));
+    }
+  }, [lang, voiceAgent, voices]);
 
-  /* Main query handler */
+  const stopSpeaking = useCallback(() => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    window.speechSynthesis?.cancel();
+    setSpeaking(null);
+  }, []);
+
+  /* ── Main query handler — always via /api/query backend ── */
   const sendQuery = useCallback(async (query) => {
     if (!query.trim() || thinking) return;
     setMsgs(p => [...p, { role: 'user', text: query }]);
@@ -99,54 +120,44 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
     setThinking(true);
 
     try {
-      let responseText = '';
+      // Route everything through FastAPI backend (handles local KB + Ollama + SQLite save)
+      const res = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          module: moduleId,
+          language: lang,
+          use_ollama: ollamaCfg.enabled,
+          ollama_url: import.meta.env.VITE_OLLAMA_URL || 'http://10.87.20.165:11434',
+          ollama_model: ollamaCfg.model || 'gemma3:4b',
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
 
-      if (ollamaCfg.enabled) {
-        /* ── Real Ollama LLM ── */
-        const res = await fetch('/ollama/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: ollamaCfg.model,
-            prompt: buildPrompt(query),
-            stream: false,
-            options: { temperature: 0.45, num_predict: 380 },
-          }),
-          signal: AbortSignal.timeout(45000),
-        });
-        if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
-        const data = await res.json();
-        responseText = data.response || '';
+      if (!res.ok) {
+        // Backend down — graceful local fallback
+        const fallback = findAnswer(query, moduleId, lang);
+        setMsgs(p => [...p, { role: 'ai', text: fallback?.text, sources: fallback?.sources || [], offline: true }]);
+        speakBackend(fallback?.text || '', msgs.length + 1);
       } else {
-        /* ── Local rule-based ── */
-        await new Promise(r => setTimeout(r, 800 + Math.random() * 500));
-        const result = findAnswer(query, moduleId, lang);
-        responseText = result?.text || t('welcome');
+        const data = await res.json();
+        const aiMsg = { role: 'ai', text: data.response, sources: data.sources || [], mode: data.mode };
+        setMsgs(p => [...p, aiMsg]);
+        speakBackend(data.response, msgs.length + 1);
       }
-
-      const aiMsg = { role: 'ai', text: responseText, sources: findAnswer(query, moduleId, lang)?.sources || [] };
-      setMsgs(p => [...p, aiMsg]);
-
-      // Save to history
-      const hist = lsGet('gram_hist', []);
-      lsSet('gram_hist', [{ query, moduleId, lang, response: responseText, ts: new Date().toISOString() }, ...hist].slice(0, 100));
-
-      // Auto-speak
-      speakWithAgent(responseText, voices, lang, voiceAgent, () => setSpeaking(msgs.length + 1), () => setSpeaking(null));
-
     } catch (err) {
-      const errMsg = ollamaCfg.enabled
-        ? `❌ Ollama error: ${err.message}. Switching to local response…`
-        : err.message;
+      // Full offline fallback
       const fallback = findAnswer(query, moduleId, lang);
-      setMsgs(p => [...p, { role: 'ai', text: fallback?.text || errMsg, sources: fallback?.sources || [] }]);
+      const errText = fallback?.text || `Error: ${err.message}`;
+      setMsgs(p => [...p, { role: 'ai', text: errText, sources: fallback?.sources || [] }]);
     }
     setThinking(false);
-  }, [thinking, moduleId, lang, ollamaCfg, voices, voiceAgent, msgs.length, t]);
+  }, [thinking, moduleId, lang, ollamaCfg, speakBackend, msgs.length]);
 
   const handleSpeak = (text, idx) => {
-    if (speaking === idx) { window.speechSynthesis?.cancel(); setSpeaking(null); return; }
-    speakWithAgent(text, voices, lang, voiceAgent, () => setSpeaking(idx), () => setSpeaking(null));
+    if (speaking === idx) { stopSpeaking(); return; }
+    speakBackend(text, idx);
   };
 
   const sugg = mod.suggested[lang] || mod.suggested.hi;
@@ -407,10 +418,27 @@ function ServicesScreen({ lang, t, onModuleSelect }) {
    HISTORY SCREEN
 ═══════════════════════════════════════════════════════════════════ */
 function HistoryScreen({ lang, t, onReplay }) {
-  const [history, setHistory] = useState(() => lsGet('gram_hist', []));
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
   const modIcons = { govt:'🏛️', farm:'🌾', health:'🏥', edu:'📖' };
 
-  const clear = () => { lsSet('gram_hist', []); setHistory([]); };
+  // Load from backend SQLite on mount
+  useEffect(() => {
+    fetch('/api/history?limit=100')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        // Backend uses 'module' field, map to 'moduleId' for display
+        setHistory(data.map(h => ({ ...h, moduleId: h.module, ts: h.timestamp })));
+      })
+      .catch(() => setHistory(lsGet('gram_hist', [])))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const clear = async () => {
+    try { await fetch('/api/history', { method: 'DELETE' }); } catch {}
+    lsSet('gram_hist', []);
+    setHistory([]);
+  };
 
   return (
     <div className="screen-scroll scrollable">
@@ -419,7 +447,9 @@ function HistoryScreen({ lang, t, onReplay }) {
           <div className="hist-title">{t('historyTitle')} ({history.length})</div>
           {history.length > 0 && <button className="hist-clear" onClick={clear}>{t('clearAll')}</button>}
         </div>
-        {history.length === 0
+        {loading
+          ? <div className="empty-state"><div className="empty-icon" style={{animation:'spin 1s linear infinite'}}>⏳</div><div>Loading...</div></div>
+          : history.length === 0
           ? <div className="empty-state"><div className="empty-icon">📋</div><div>{t('noHistory')}</div></div>
           : history.map((h, i) => (
             <div key={i} className="hist-item" onClick={() => onReplay(h)}>
@@ -449,13 +479,22 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
   const testConnection = async () => {
     setTesting(true); setTestResult(null);
     try {
-      const res = await fetch('/ollama/api/tags', { signal: AbortSignal.timeout(6000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status} — proxy target: ${DEFAULT_OLLAMA_URL}`);
-      const data = await res.json();
-      const models = (data.models || []).map(m => m.name);
+      // Test via backend proxy (avoids CORS) and check TTS
+      const [ollamaRes, ttsRes] = await Promise.allSettled([
+        fetch(`/api/ollama/models?url=${encodeURIComponent(DEFAULT_OLLAMA_URL)}`, { signal: AbortSignal.timeout(8000) }),
+        fetch('/health', { signal: AbortSignal.timeout(3000) }),
+      ]);
+      const ollamaData = ollamaRes.status === 'fulfilled' && ollamaRes.value.ok
+        ? await ollamaRes.value.json() : { connected: false, models: [] };
+      const ttsOk = ttsRes.status === 'fulfilled' && ttsRes.value.ok;
+      const models = ollamaData.models || [];
       setAvailModels(models);
       if (models.length && !models.includes(form.model)) setForm(f => ({ ...f, model: models[0] }));
-      setTestResult({ ok: true, msg: `${t('connected')} ${models.length} model(s): ${models.slice(0,4).join(', ')}` });
+      const ollamaStatus = ollamaData.connected
+        ? `✅ Ollama: ${models.length} models (${models.slice(0,3).join(', ')})`
+        : `❌ Ollama: ${ollamaData.error || 'not reachable'}`;
+      const ttsStatus = ttsOk ? '✅ Neural TTS (edge-tts) ready' : '⚠️ TTS unavailable';
+      setTestResult({ ok: ollamaData.connected, msg: `${ollamaStatus}\n${ttsStatus}` });
     } catch (e) {
       setTestResult({ ok: false, msg: `${t('connectFail')}: ${e.message}` });
     }
@@ -469,9 +508,18 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
     onToast(cfg.enabled ? t('ollamaEnabled') : t('ollamaDisabled'));
   };
 
-  const testSpeak = (agentId) => {
-    const demo = { hi: 'नमस्ते! मैं GramSathi AI हूं।', mr: 'नमस्कार! मी GramSathi AI आहे.', en: 'Hello! I am GramSathi AI.' };
-    speakWithAgent(demo[lang] || demo.hi, voices, lang, agentId, () => {}, () => {});
+  const testSpeak = async (agentId) => {
+    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं। आपकी सेवा में हाज़िर हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे. आपली सेवा करण्यास तयार आहे.', en: 'Hello! I am GramSathi AI, your village assistant.' };
+    const text = demo[lang] || demo.hi;
+    try {
+      const gender = ['dadi','doctor'].includes(agentId) ? 'female' : 'male';
+      const res = await fetch(`/api/tts?text=${encodeURIComponent(text)}&lang=${lang}&gender=${gender}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      new Audio(URL.createObjectURL(blob)).play();
+    } catch {
+      speakWithAgent(text, voices, lang, agentId, () => {}, () => {});
+    }
   };
 
   return (

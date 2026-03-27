@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import unquote
 import sqlite3, json, datetime, os, re, io, asyncio
 
 app = FastAPI(title="GramSathi AI Backend", version="2.0.0")
@@ -24,6 +25,68 @@ app.add_middleware(
 DB_PATH      = "gramsathi.db"
 OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://10.87.20.165:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
+
+SUPPORTED_LANGS = {"hi", "mr", "en", "bn", "ta", "te", "gu", "kn", "ml", "pa"}
+
+LANG_META = {
+    "hi": {"label": "Hindi", "script": "Devanagari", "regex": r"[\u0900-\u097F]"},
+    "mr": {"label": "Marathi", "script": "Devanagari", "regex": r"[\u0900-\u097F]"},
+    "en": {"label": "English", "script": "Latin", "regex": r"[A-Za-z]"},
+    "bn": {"label": "Bengali", "script": "Bengali", "regex": r"[\u0980-\u09FF]"},
+    "ta": {"label": "Tamil", "script": "Tamil", "regex": r"[\u0B80-\u0BFF]"},
+    "te": {"label": "Telugu", "script": "Telugu", "regex": r"[\u0C00-\u0C7F]"},
+    "gu": {"label": "Gujarati", "script": "Gujarati", "regex": r"[\u0A80-\u0AFF]"},
+    "kn": {"label": "Kannada", "script": "Kannada", "regex": r"[\u0C80-\u0CFF]"},
+    "ml": {"label": "Malayalam", "script": "Malayalam", "regex": r"[\u0D00-\u0D7F]"},
+    "pa": {"label": "Punjabi", "script": "Gurmukhi", "regex": r"[\u0A00-\u0A7F]"},
+}
+
+
+def normalize_lang(lang: str) -> str:
+    base = (lang or "en").split("-")[0].lower().strip()
+    return base if base in SUPPORTED_LANGS else "en"
+
+
+def text_matches_language(text: str, lang: str) -> bool:
+    # Consider only letters/scripts while ignoring punctuation, numbers and emojis.
+    if not text:
+        return False
+    meta = LANG_META.get(lang, LANG_META["en"])
+    script_chars = len(re.findall(meta["regex"], text))
+    alpha_chars = len(re.findall(r"[A-Za-z\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]", text))
+    if alpha_chars == 0:
+        return False
+    return (script_chars / alpha_chars) >= 0.6
+
+
+def detect_query_language(text: str, fallback_lang: str) -> str:
+    fallback_lang = normalize_lang(fallback_lang)
+
+    # Unique scripts first.
+    if re.search(LANG_META["bn"]["regex"], text):
+        return "bn"
+    if re.search(LANG_META["ta"]["regex"], text):
+        return "ta"
+    if re.search(LANG_META["te"]["regex"], text):
+        return "te"
+    if re.search(LANG_META["gu"]["regex"], text):
+        return "gu"
+    if re.search(LANG_META["kn"]["regex"], text):
+        return "kn"
+    if re.search(LANG_META["ml"]["regex"], text):
+        return "ml"
+    if re.search(LANG_META["pa"]["regex"], text):
+        return "pa"
+
+    # Devanagari can be Hindi or Marathi; keep user's selected one if applicable.
+    if re.search(LANG_META["hi"]["regex"], text):
+        return fallback_lang if fallback_lang in {"hi", "mr"} else "hi"
+
+    # Latin-only queries treated as English.
+    if re.search(LANG_META["en"]["regex"], text):
+        return "en"
+
+    return fallback_lang
 
 # ── Best Neural voices (edge-tts / Microsoft) ────────────────
 EDGE_VOICES = {
@@ -319,7 +382,7 @@ def find_answer(query: str, module: str, lang: str = "hi") -> dict:
     for entry in entries:
         if any(p.lower() in q for p in entry["patterns"]):
             return {
-                "text": entry.get(lang) or entry.get("hi", ""),
+                "text": entry.get(lang) or entry.get("en") or entry.get("hi", ""),
                 "sources": entry.get("sources", [])
             }
     fallback = {
@@ -327,10 +390,17 @@ def find_answer(query: str, module: str, lang: str = "hi") -> dict:
               "कृपया अधिक विस्तार से पूछें या नजदीकी कृषि/स्वास्थ्य केंद्र जाएं।",
         "mr": "माफ करा, या प्रश्नाचे उत्तर मला सापडले नाही। "
               "कृपया अधिक तपशीलवार विचारा किंवा जवळच्या केंद्राशी संपर्क करा।",
-              "en": "Sorry, I couldn't find an exact answer. "
+        "en": "Sorry, I couldn't find an exact answer. "
               "Please ask in more detail or visit your nearest agriculture/health center.",
+        "bn": "দুঃখিত, এই প্রশ্নের সঠিক উত্তর এখন পাইনি। অনুগ্রহ করে আরও বিস্তারিতভাবে জিজ্ঞাসা করুন।",
+        "ta": "மன்னிக்கவும், இந்த கேள்விக்கு துல்லியமான பதில் கிடைக்கவில்லை. தயவுசெய்து மேலும் விவரமாக கேளுங்கள்.",
+        "te": "క్షమించండి, ఈ ప్రశ్నకు ఖచ్చితమైన సమాధానం దొరకలేదు. దయచేసి మరింత వివరంగా అడగండి.",
+        "gu": "માફ કરશો, આ પ્રશ્નનો સચોટ જવાબ મળ્યો નથી. કૃપા કરીને વધુ વિગતથી પૂછો.",
+        "kn": "ಕ್ಷಮಿಸಿ, ಈ ಪ್ರಶ್ನೆಗೆ ಖಚಿತ ಉತ್ತರ ಸಿಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಹೆಚ್ಚಿನ ವಿವರಗಳೊಂದಿಗೆ ಕೇಳಿ.",
+        "ml": "ക്ഷമിക്കണം, ഈ ചോദ്യത്തിന് കൃത്യമായ മറുപടി ലഭിച്ചില്ല. ദയവായി കൂടുതൽ വിശദമായി ചോദിക്കൂ.",
+        "pa": "ਮਾਫ ਕਰਨਾ, ਇਸ ਸਵਾਲ ਦਾ ਸਹੀ ਜਵਾਬ ਨਹੀਂ ਮਿਲਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਹੋਰ ਵੇਰਵੇ ਨਾਲ ਪੁੱਛੋ।",
     }
-    return {"text": fallback.get(lang, fallback["hi"]), "sources": []}
+    return {"text": fallback.get(lang, fallback["en"]), "sources": []}
 
 # ── Pydantic Models ───────────────────────────────────────────
 class QueryRequest(BaseModel):
@@ -361,8 +431,9 @@ async def call_gemini(prompt: str, api_key: str) -> str:
         raise HTTPException(status_code=502, detail=f"Gemini error: {str(e)}")
 
 def build_rural_prompt(query: str, module: str, lang: str, context: str) -> str:
-    lang_labels = {"hi": "हिंदी (Hindi)", "mr": "मराठी (Marathi)", "en": "English"}
-    lang_label  = lang_labels.get(lang, "हिंदी")
+    lang = normalize_lang(lang)
+    lang_label = LANG_META[lang]["label"]
+    script_label = LANG_META[lang]["script"]
     module_ctx  = {
         "govt":   "government schemes for farmers and rural people in India",
         "farm":   "farming, crops, pest control, fertilizers, irrigation for Indian farmers",
@@ -375,20 +446,39 @@ def build_rural_prompt(query: str, module: str, lang: str, context: str) -> str:
 Your role: Help with {module_ctx}.
 
 STRICT RULES:
-1. Reply ONLY in {lang_label} language. Do not mix languages.
-2. Use very SIMPLE words — as if explaining to a farmer or village person who has basic education.
-3. Be CONCISE — under 150 words.
-4. Give PRACTICAL, ACTIONABLE advice — what they can do TODAY.
-5. If health-related: always say "डॉक्टर को दिखाएं" (see a doctor) for serious issues.
-6. Use emojis sparingly (1-2 max) to make it friendly.
-7. No technical jargon. No English words in Hindi/Marathi responses.
+1. Reply ONLY in {lang_label}. Do not mix languages.
+2. Write ONLY in {script_label}. Do not use another script.
+3. Use very SIMPLE words — as if explaining to a farmer or village person who has basic education.
+4. Be CONCISE — under 150 words.
+5. Give PRACTICAL, ACTIONABLE advice — what they can do TODAY.
+6. If health-related and serious, always advise seeing a doctor in {lang_label}.
+7. Use emojis sparingly (1-2 max) to make it friendly.
+8. No technical jargon.
 
 Context from knowledge base:
 {context}
 
 User's question: {query}
 
-Answer in {lang_label} (simple, helpful, friendly):"""
+Answer in {lang_label} using {script_label} only (simple, helpful, friendly):"""
+
+
+def build_language_rewrite_prompt(answer_text: str, lang: str) -> str:
+    lang = normalize_lang(lang)
+    lang_label = LANG_META[lang]["label"]
+    script_label = LANG_META[lang]["script"]
+    return f"""Rewrite the answer below in {lang_label}.
+
+STRICT RULES:
+1. Output ONLY in {lang_label} using {script_label} script.
+2. Do NOT mix any other language.
+3. Keep meaning the same.
+4. Keep it concise and practical.
+5. Return only the rewritten answer text.
+
+Answer to rewrite:
+{answer_text}
+"""
 
 # ── API Routes ───────────────────────────────────────────────
 @app.get("/")
@@ -405,19 +495,39 @@ async def process_query(req: QueryRequest):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    req.language = normalize_lang(req.language)
+    response_lang = detect_query_language(req.query, req.language)
+
     # PII scrubbing
     q = re.sub(r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[AADHAAR]', req.query)
     q = re.sub(r'\b[6-9]\d{9}\b', '[PHONE]', q)
 
     # Always get local context
-    local = find_answer(q, req.module, req.language)
-    prompt = build_rural_prompt(q, req.module, req.language, local["text"])
+    local = find_answer(q, req.module, response_lang)
+    prompt = build_rural_prompt(q, req.module, response_lang, local["text"])
 
     if req.ai_engine == "gemini":
         gemini_key = req.gemini_key or os.getenv("GEMINI_API_KEY")
         if gemini_key:
             try:
                 response_text = await call_gemini(prompt, gemini_key)
+                if not text_matches_language(response_text, response_lang):
+                    rewrite_prompt = build_language_rewrite_prompt(response_text, response_lang)
+                    response_text = await call_gemini(rewrite_prompt, gemini_key)
+                    if not text_matches_language(response_text, response_lang):
+                        fallback_text = {
+                            "hi": "माफ कीजिए, मैं अभी सही भाषा में उत्तर नहीं दे पाया। कृपया वही सवाल फिर से पूछें।",
+                            "mr": "माफ करा, सध्या योग्य भाषेत उत्तर देता आले नाही. कृपया तोच प्रश्न पुन्हा विचारा.",
+                            "en": "Sorry, I could not respond in the selected language right now. Please ask the same question again.",
+                            "bn": "দুঃখিত, এই মুহূর্তে নির্বাচিত ভাষায় উত্তর দিতে পারিনি। অনুগ্রহ করে একই প্রশ্ন আবার করুন।",
+                            "ta": "மன்னிக்கவும், தேர்ந்தெடுத்த மொழியில் இப்போது பதிலளிக்க முடியவில்லை. அதே கேள்வியை மீண்டும் கேளுங்கள்.",
+                            "te": "క్షమించండి, ఎంపిక చేసిన భాషలో ఇప్పుడే సమాధానం ఇవ్వలేకపోయాను. అదే ప్రశ్నను మళ్లీ అడగండి.",
+                            "gu": "માફ કરશો, હાલમાં પસંદ કરેલી ભાષામાં જવાબ આપી શક્યો નથી. એ જ પ્રશ્ન ફરી પૂછો.",
+                            "kn": "ಕ್ಷಮಿಸಿ, ಆಯ್ದ ಭಾಷೆಯಲ್ಲಿ ಈಗ ಉತ್ತರಿಸಲು ಆಗಲಿಲ್ಲ. ಅದೇ ಪ್ರಶ್ನೆಯನ್ನು ಮತ್ತೆ ಕೇಳಿ.",
+                            "ml": "ക്ഷമിക്കണം, തിരഞ്ഞെടുക്കപ്പെട്ട ഭാഷയിൽ ഇപ്പോൾ മറുപടി നൽകാനായില്ല. അതേ ചോദ്യം വീണ്ടും ചോദിക്കൂ.",
+                            "pa": "ਮਾਫ ਕਰਨਾ, ਚੁਣੀ ਹੋਈ ਭਾਸ਼ਾ ਵਿੱਚ ਹੁਣੇ ਜਵਾਬ ਨਹੀਂ ਦੇ ਸਕਿਆ। ਓਹੀ ਸਵਾਲ ਦੁਬਾਰਾ ਪੁੱਛੋ।",
+                        }
+                        response_text = fallback_text.get(response_lang, fallback_text["en"])
                 sources = local["sources"] + ["Google Gemini"]
             except Exception as e:
                 print(f"Gemini call failed: {e}")
@@ -435,7 +545,7 @@ async def process_query(req: QueryRequest):
     conn = get_db()
     conn.execute(
         "INSERT INTO queries (module, language, query, response, sources, timestamp) VALUES (?,?,?,?,?,?)",
-        (req.module, req.language, req.query, response_text,
+        (req.module, response_lang, req.query, response_text,
          json.dumps(sources), datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -445,7 +555,7 @@ async def process_query(req: QueryRequest):
         "query": req.query,
         "response": response_text,
         "module": req.module,
-        "language": req.language,
+        "language": response_lang,
         "sources": sources,
         "privacy": "cloud" if req.ai_engine == "gemini" else "on-device",
         "cloud_calls": 1 if req.ai_engine == "gemini" else 0,
@@ -463,20 +573,33 @@ async def text_to_speech(
     """
     try:
         from gtts import gTTS
-        import io
+
+        # Decode percent-encoded text when clients pass encoded payloads.
+        decoded_text = unquote(text or "")
 
         # Clean text
-        clean = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+        clean = re.sub(r'\*\*(.*?)\*\*', r'\1', decoded_text)
         clean = re.sub(r'[^\w\s\.,!\?।\u0900-\u097F-]', '', clean)
         clean = re.sub(r'\n+', '. ', clean)
         clean = re.sub(r'\s+', ' ', clean).strip()
 
+        # Keep synthesis short and stable for network TTS providers.
+        clean = clean[:320]
+
         if not clean:
             clean = "नमस्कार"
 
-        target_lang = "hi"
-        if lang.startswith("mr"): target_lang = "mr"
+        target_lang = "en"
+        if lang.startswith("hi"): target_lang = "hi"
+        elif lang.startswith("mr"): target_lang = "mr"
         elif lang.startswith("en"): target_lang = "en"
+        elif lang.startswith("bn"): target_lang = "bn"
+        elif lang.startswith("ta"): target_lang = "ta"
+        elif lang.startswith("te"): target_lang = "te"
+        elif lang.startswith("gu"): target_lang = "gu"
+        elif lang.startswith("kn"): target_lang = "kn"
+        elif lang.startswith("ml"): target_lang = "ml"
+        elif lang.startswith("pa"): target_lang = "pa"
 
         # Generate audio directly into memory buffer
         tts = gTTS(text=clean, lang=target_lang, slow=False)
@@ -490,7 +613,29 @@ async def text_to_speech(
             headers={"Cache-Control": "no-cache"}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS stream error: {str(e)}")
+        # Hard fallback: generate a short local WAV silence so the endpoint never 500s on TTS outages.
+        import wave
+        import struct
+
+        sample_rate = 16000
+        duration_sec = 0.7
+        n_samples = int(sample_rate * duration_sec)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit PCM
+            wf.setframerate(sample_rate)
+            for _ in range(n_samples):
+                wf.writeframes(struct.pack("<h", 0))
+
+        return Response(
+            content=buf.getvalue(),
+            media_type="audio/wav",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-TTS-Fallback": f"1; reason={str(e)[:120]}"
+            }
+        )
 
 @app.post("/api/stt")
 async def speech_to_text(file: UploadFile = File(...)):

@@ -18,6 +18,13 @@ export const MODULES = {
       hi: ['PM किसान योजना क्या है?', 'MNREGA में काम कैसे मिलेगा?', 'आयुष्मान भारत में कौन पात्र है?', 'राशन कार्ड कैसे बनता है?'],
       mr: ['PM किसान योजना काय आहे?', 'MNREGA कार्ड कसे मिळते?'],
       en: ['What is PM Kisan scheme?', 'How to apply for MNREGA?'],
+      bn: ['PM কিষান স্কিম কী?', 'MNREGA-র জন্য কীভাবে আবেদন করব?'],
+      ta: ['PM கிசான் திட்டம் என்ன?', 'MNREGAக்கு எப்படி விண்ணப்பிப்பது?'],
+      te: ['PM కిసాన్ పథకం ఏమిటి?', 'MNREGAకి ఎలా దరఖాస్తు చేయాలి?'],
+      gu: ['PM કિસાન યોજના શું છે?', 'MNREGA માટે કેવી રીતે અરજી કરવી?'],
+      kn: ['PM ಕಿಸಾನ್ ಯೋಜನೆ ಏನು?', 'MNREGAಗೆ ಹೇಗೆ ಅರ್ಜಿ ಹಾಕಬೇಕು?'],
+      ml: ['PM കിസാൻ പദ്ധതി എന്താണ്?', 'MNREGAയ്ക്ക് എങ്ങനെ അപേക്ഷിക്കാം?'],
+      pa: ['PM ਕਿਸਾਨ ਯੋਜਨਾ ਕੀ ਹੈ?', 'MNREGA ਲਈ ਅਰਜ਼ੀ ਕਿਵੇਂ ਦੇਈਏ?'],
     },
     knowledge: [
       {
@@ -64,6 +71,13 @@ export const MODULES = {
       hi: ['जुलाई में कौन सी फसल बोएं?', 'गेहूं में लगने वाले कीड़े', 'यूरिया की सही मात्रा', 'धान में पानी कब दें?'],
       mr: ['जुलैमध्ये कोणती पिके घ्यावीत?', 'गव्हावरील कीड कोणती?'],
       en: ['Best crops for July?', 'How to control pests in wheat?'],
+      bn: ['জুলাইয়ে কোন ফসল ভালো?', 'গমে পোকা কীভাবে নিয়ন্ত্রণ করব?'],
+      ta: ['ஜூலையில் எந்த பயிர் நல்லது?', 'கோதுமையில் பூச்சி கட்டுப்பாடு எப்படி?'],
+      te: ['జూలైలో ఏ పంట మంచిది?', 'గోధుమలో పురుగును ఎలా నియంత్రించాలి?'],
+      gu: ['જુલાઈમાં કયો પાક સારો?', 'ઘઉંમાં જીવાત કેવી રીતે કાબૂમાં રાખવી?'],
+      kn: ['ಜುಲೈನಲ್ಲಿ ಯಾವ ಬೆಳೆ ಉತ್ತಮ?', 'ಗೋಧಿಯಲ್ಲಿ ಕೀಟ ನಿಯಂತ್ರಣ ಹೇಗೆ?'],
+      ml: ['ജൂലൈയിൽ ഏത് വിള നല്ലത്?', 'ഗോതമ്പിൽ കീട നിയന്ത്രണം എങ്ങനെ?'],
+      pa: ['ਜੁਲਾਈ ਵਿੱਚ ਕਿਹੜੀ ਫਸਲ ਚੰਗੀ?', 'ਗੇਹੂੰ ਵਿੱਚ ਕੀੜੇ ਕਿਵੇਂ ਕਾਬੂ ਕਰੀਏ?'],
     },
     knowledge: [
       {
@@ -110,6 +124,13 @@ export const MODULES = {
       hi: ['बुखार में क्या करूं?', 'बच्चे को दस्त हो रहे हैं', 'सर्दी-खांसी का घरेलू उपाय', 'पेट में दर्द है'],
       mr: ['तापावर काय करावे?', 'मुलाला जुलाब होत आहे'],
       en: ['What to do for fever?', 'Home remedy for cold?'],
+      bn: ['জ্বর হলে কী করব?', 'সর্দি-কাশির ঘরোয়া উপায় কী?'],
+      ta: ['காய்ச்சல் হলে என்ன செய்யலாம்?', 'சளி இருமலுக்கு வீட்டுவழி என்ன?'],
+      te: ['జ్వరం అయితే ఏమి చేయాలి?', 'జలుబు దగ్గుకు ఇంటి చికిత్స ఏది?'],
+      gu: ['તાવ આવે તો શું કરવું?', 'સર્દી-ખાંસી માટે ઘરેલું ઉપાય શું?'],
+      kn: ['ಜ್ವರ ಬಂದರೆ ಏನು ಮಾಡಬೇಕು?', 'ಜಲದೋಷ ಕೆಮ್ಮಿಗೆ ಮನೆಮದ್ದು ಏನು?'],
+      ml: ['പനി വന്നാൽ എന്ത് ചെയ്യണം?', 'ചുമ-തുമ്മലിന് വീട്ടുവൈദ്യം എന്ത്?'],
+      pa: ['ਬੁਖਾਰ ਆਏ ਤਾਂ ਕੀ ਕਰੀਏ?', 'ਜ਼ੁਕਾਮ-ਖੰਘ ਲਈ ਘਰੇਲੂ ਇਲਾਜ ਕੀ ਹੈ?'],
     },
     knowledge: [
       {
@@ -156,6 +177,13 @@ export const MODULES = {
       hi: ['प्रकाश संश्लेषण क्या है?', 'पाइथागोरस प्रमेय समझाओ', 'भारत की राजधानी क्या है?', 'ब्याज कैसे निकालते हैं?'],
       mr: ['प्रकाश संश्लेषण म्हणजे काय?', 'पायथागोरस प्रमेय सांगा'],
       en: ['What is photosynthesis?', 'Explain Pythagoras theorem'],
+      bn: ['ফটোসিন্থেসিস কী?', 'পাইথাগোরাসের উপপাদ্য বুঝিয়ে বলো'],
+      ta: ['ஒளிச்சேர்க்கை என்றால் என்ன?', 'பைதகோரஸ் கோட்பாடு விளக்கவும்'],
+      te: ['ఫోటోసింథసిస్ అంటే ఏమిటి?', 'పైథాగరస్ సిద్ధాంతం చెప్పండి'],
+      gu: ['પ્રકાશ સંશ્લેષણ શું છે?', 'પાયથાગોરસ સિદ્ધાંત સમજાવો'],
+      kn: ['ಪ್ರಕಾಶ ಸಂಶ್ಲೇಷಣೆ ಎಂದರೇನು?', 'ಪೈಥಾಗೊರಸ್ ಸೂತ್ರ ವಿವರಿಸಿ'],
+      ml: ['ഫോട്ടോസിന്തസിസ് എന്താണ്?', 'പൈതഗോറസ് സിദ്ധാന്തം വിശദീകരിക്കൂ'],
+      pa: ['ਫੋਟੋਸਿੰਥੈਸਿਸ ਕੀ ਹੈ?', 'ਪਾਇਥਾਗੋਰਸ ਥਿਓਰਮ ਸਮਝਾਓ'],
     },
     knowledge: [
       {
@@ -197,7 +225,7 @@ export const findAnswer = (query, moduleId, lang = 'hi') => {
   const q = query.toLowerCase().trim();
   for (const entry of mod.knowledge) {
     if (entry.patterns.some(p => q.includes(p.toLowerCase()))) {
-      return { text: entry[lang] || entry.hi, sources: entry.sources };
+      return { text: entry[lang] || entry.en || entry.hi, sources: entry.sources };
     }
   }
   // Fallback
@@ -205,6 +233,13 @@ export const findAnswer = (query, moduleId, lang = 'hi') => {
     hi: `मैं GramSathi AI हूं — आपका गाँव का साथी! 🌿\n\nआपने पूछा: "${query}"\n\nमुझे इस सवाल का जवाब अभी नहीं मिला। कृपया इन विषयों पर पूछें:\n${mod.suggested.hi.map(s => `• ${s}`).join('\n')}\n\n🔒 आपकी जानकारी सुरक्षित है — कोई डेटा बाहर नहीं जाता।`,
     mr: `मी GramSathi AI आहे! 🌿\n\nतुम्ही विचारले: "${query}"\n\nया विषयांवर विचारा:\n${(mod.suggested.mr || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
     en: `I'm GramSathi AI! 🌿\n\nYou asked: "${query}"\n\nTry asking:\n${mod.suggested.en.map(s => `• ${s}`).join('\n')}`,
+    bn: `আমি GramSathi AI! 🌿\n\nআপনি জিজ্ঞেস করেছেন: "${query}"\n\nএগুলো জিজ্ঞেস করতে পারেন:\n${(mod.suggested.bn || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    ta: `நான் GramSathi AI! 🌿\n\nநீங்கள் கேட்டது: "${query}"\n\nஇவைகளை கேளுங்கள்:\n${(mod.suggested.ta || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    te: `నేను GramSathi AI! 🌿\n\nమీరు అడిగింది: "${query}"\n\nఇవీ అడగండి:\n${(mod.suggested.te || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    gu: `હું GramSathi AI છું! 🌿\n\nતમે પૂછ્યું: "${query}"\n\nઆ પ્રશ્નો પૂછી શકો:\n${(mod.suggested.gu || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    kn: `ನಾನು GramSathi AI! 🌿\n\nನೀವು ಕೇಳಿದ್ದು: "${query}"\n\nಇವುಗಳನ್ನು ಕೇಳಬಹುದು:\n${(mod.suggested.kn || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    ml: `ഞാൻ GramSathi AI ആണ്! 🌿\n\nനിങ്ങൾ ചോദിച്ചത്: "${query}"\n\nഇവ ചോദിക്കാം:\n${(mod.suggested.ml || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
+    pa: `ਮੈਂ GramSathi AI ਹਾਂ! 🌿\n\nਤੁਸੀਂ ਪੁੱਛਿਆ: "${query}"\n\nਇਹ ਸਵਾਲ ਪੁੱਛੋ:\n${(mod.suggested.pa || mod.suggested.en || mod.suggested.hi).map(s => `• ${s}`).join('\n')}`,
   };
   return { text: fallback[lang] || fallback.hi, sources: [] };
 };

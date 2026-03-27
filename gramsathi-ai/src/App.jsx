@@ -4,13 +4,23 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { I18N, translate } from './i18n.js';
+import { translate } from './i18n.js';
 import { VOICE_AGENTS, loadVoices, speakWithAgent } from './voiceAgents.js';
 import { MODULES, findAnswer }  from './data/knowledge.js';
 
 /* ── Constants ──────────────────────────────────────────────────── */
-const LANGS = { hi: 'हि', mr: 'म', en: 'En' };
-const LANG_CODES = { hi: 'hi-IN', mr: 'mr-IN', en: 'en-IN' };
+const LANGS = {
+  hi: { short: 'हि', name: 'हिंदी', speechCode: 'hi-IN' },
+  mr: { short: 'म', name: 'मराठी', speechCode: 'mr-IN' },
+  en: { short: 'En', name: 'English', speechCode: 'en-IN' },
+  bn: { short: 'বাং', name: 'বাংলা', speechCode: 'bn-IN' },
+  ta: { short: 'த', name: 'தமிழ்', speechCode: 'ta-IN' },
+  te: { short: 'తె', name: 'తెలుగు', speechCode: 'te-IN' },
+  gu: { short: 'ગુ', name: 'ગુજરાતી', speechCode: 'gu-IN' },
+  kn: { short: 'ಕ', name: 'ಕನ್ನಡ', speechCode: 'kn-IN' },
+  ml: { short: 'മ', name: 'മലയാളം', speechCode: 'ml-IN' },
+  pa: { short: 'ਪੰ', name: 'ਪੰਜਾਬੀ', speechCode: 'pa-IN' },
+};
 const NAV_ITEMS = [
   { id: 'home',     icon: '🏠' },
   { id: 'services', icon: '📦' },
@@ -20,10 +30,10 @@ const NAV_ITEMS = [
 const DEFAULT_OLLAMA_URL   = import.meta.env.VITE_OLLAMA_URL   || 'http://10.87.20.165:11434';
 const DEFAULT_OLLAMA_MODEL = import.meta.env.VITE_OLLAMA_MODEL || 'gemma3:4b';
 const QUICK_QUERIES = [
-  { icon: '🏛️', hi: 'पीएम किसान योजना क्या है?', mr: 'PM किसान योजना काय आहे?', en: 'What is PM Kisan scheme?', module: 'govt' },
-  { icon: '🌾', hi: 'जुलाई में कौन सी फसल बोएं?', mr: 'जुलैमध्ये कोणती पिके घ्यावीत?', en: 'Best crops for July?', module: 'farm' },
-  { icon: '🏥', hi: 'मुझे बुखार है क्या करूं?', mr: 'मला ताप आहे काय करावे?', en: 'I have fever, what to do?', module: 'health' },
-  { icon: '📖', hi: 'प्रकाश संश्लेषण क्या है?', mr: 'प्रकाश संश्लेषण काय आहे?', en: 'What is photosynthesis?', module: 'edu' },
+  { icon: '🏛️', hi: 'पीएम किसान योजना क्या है?', mr: 'PM किसान योजना काय आहे?', en: 'What is PM Kisan scheme?', bn: 'PM কিষান স্কিম কী?', ta: 'PM கிசான் திட்டம் என்ன?', te: 'PM కిసాన్ పథకం ఏమిటి?', gu: 'PM કિસાન યોજના શું છે?', kn: 'PM ಕಿಸಾನ್ ಯೋಜನೆ ಏನು?', ml: 'PM കിസാൻ പദ്ധതി എന്താണ്?', pa: 'PM ਕਿਸਾਨ ਯੋਜਨਾ ਕੀ ਹੈ?', module: 'govt' },
+  { icon: '🌾', hi: 'जुलाई में कौन सी फसल बोएं?', mr: 'जुलैमध्ये कोणती पिके घ्यावीत?', en: 'Best crops for July?', bn: 'জুলাইয়ে কোন ফসল ভালো?', ta: 'ஜூலையில் எந்த பயிர் சிறந்தது?', te: 'జూలైలో ఏ పంట బాగుంటుంది?', gu: 'જુલાઈમાં કઈ પાક યોગ્ય?', kn: 'ಜುಲೈನಲ್ಲಿ ಯಾವ ಬೆಳೆ ಉತ್ತಮ?', ml: 'ജൂലൈയിൽ ഏത് വിളയാണ് നല്ലത്?', pa: 'ਜੁਲਾਈ ਵਿੱਚ ਕਿਹੜੀ ਫਸਲ ਵਧੀਆ ਹੈ?', module: 'farm' },
+  { icon: '🏥', hi: 'मुझे बुखार है क्या करूं?', mr: 'मला ताप आहे काय करावे?', en: 'I have fever, what to do?', bn: 'আমার জ্বর, কী করব?', ta: 'எனக்கு காய்ச்சல், என்ன செய்யலாம்?', te: 'నాకు జ్వరం ఉంది, ఏమి చేయాలి?', gu: 'મને તાવ છે, શું કરું?', kn: 'ನನಗೆ ಜ್ವರ ಇದೆ, ಏನು ಮಾಡಲಿ?', ml: 'എനിക്ക് പനി ഉണ്ട്, എന്ത് ചെയ്യണം?', pa: 'ਮੈਨੂੰ ਬੁਖਾਰ ਹੈ, ਕੀ ਕਰਾਂ?', module: 'health' },
+  { icon: '📖', hi: 'प्रकाश संश्लेषण क्या है?', mr: 'प्रकाश संश्लेषण काय आहे?', en: 'What is photosynthesis?', bn: 'ফটোসিন্থেসিস কী?', ta: 'ஒளிச்சேர்க்கை என்றால் என்ன?', te: 'ఫోటోసింథసిస్ అంటే ఏమిటి?', gu: 'પ્રકાશ સંશ્લેષણ શું છે?', kn: 'ಪ್ರಕಾಶ ಸಂಶ್ಲೇಷಣೆ ಎಂದರೇನು?', ml: 'ഫോട്ടോസിന്തസിസ് എന്താണ്?', pa: 'ਫੋਟੋਸਿੰਥੈਸਿਸ ਕੀ ਹੈ?', module: 'edu' },
 ];
 const MODULE_KEYS = {
   govt:   { name: 'govtModule',   desc: 'govtDesc'   },
@@ -167,7 +177,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) 
 
   const sugg = mod.suggested[lang] || mod.suggested.hi;
   const modColor = `var(--${moduleId === 'edu' ? 'edu' : moduleId === 'health' ? 'health' : moduleId === 'govt' ? 'govt' : 'farm'})`;
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : t('simulation');
+  const engineLabel = aiCfg.engine === 'gemini' ? t('cloudEngine') : t('simulation');
 
   return (
     <div className="module-screen">
@@ -179,7 +189,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) 
             {MODULES[moduleId]?.icon} {t(MODULE_KEYS[moduleId]?.name || 'allServices')}
           </div>
           <div className="mod-header-sub">
-            {engineLabel} • {Object.keys(LANGS).find(k => k === lang) ? Object.values({ hi: 'हिंदी', mr: 'मराठी', en: 'English' })[Object.keys({ hi: 0, mr: 1, en: 2 })[lang]] : ''}
+            {engineLabel} • {LANGS[lang]?.name || LANGS.hi.name}
           </div>
         </div>
         <div className="current-voice hide-mobile">
@@ -276,7 +286,7 @@ function ChatInputRow({ input, setInput, onSend, lang, t, thinking, onExtMicResu
     if (!SR) { alert(t('noSpeechSupport') || 'Speech not supported on this browser.'); return; }
     try {
       const r = new SR();
-      r.lang = LANG_CODES[lang] || 'hi-IN';
+      r.lang = LANGS[lang]?.speechCode || LANGS.hi.speechCode;
       r.onstart  = () => setRecording(true);
       r.onend    = () => setRecording(false);
       r.onerror  = (e) => { setRecording(false); console.warn('STT Error', e); };
@@ -288,7 +298,7 @@ function ChatInputRow({ input, setInput, onSend, lang, t, thinking, onExtMicResu
       r.start();
       recRef.current = r;
     } catch (e) {
-      alert("Microphone denied or blocked.");
+      alert(t('micBlocked'));
     }
   };
 
@@ -329,7 +339,7 @@ function HomeScreen({ lang, t, onModuleSelect, voices, voiceAgent }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { alert(t('noSpeechSupport')); return; }
     const r = new SR();
-    r.lang = LANG_CODES[lang] || 'hi-IN';
+    r.lang = LANGS[lang]?.speechCode || LANGS.hi.speechCode;
     r.onstart  = () => setRecording(true);
     r.onend    = () => setRecording(false);
     r.onerror  = () => setRecording(false);
@@ -464,7 +474,7 @@ function HistoryScreen({ lang, t, onReplay }) {
           {history.length > 0 && <button className="hist-clear" onClick={clear}>{t('clearAll')}</button>}
         </div>
         {loading
-          ? <div className="empty-state"><div className="empty-icon" style={{animation:'spin 1s linear infinite'}}>⏳</div><div>Loading...</div></div>
+          ? <div className="empty-state"><div className="empty-icon" style={{animation:'spin 1s linear infinite'}}>⏳</div><div>{t('loading')}</div></div>
           : history.length === 0
           ? <div className="empty-state"><div className="empty-icon">📋</div><div>{t('noHistory')}</div></div>
           : history.map((h, i) => (
@@ -473,7 +483,7 @@ function HistoryScreen({ lang, t, onReplay }) {
               <div className="hi-meta">
                 <span className={`hi-module-tag ${h.moduleId}`}>{modIcons[h.moduleId]} {t(MODULE_KEYS[h.moduleId]?.name)}</span>
                 <span>{h.lang?.toUpperCase()}</span>
-                <span>{new Date(h.ts).toLocaleString('hi-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</span>
+                <span>{new Date(h.ts).toLocaleString(LANGS[lang]?.speechCode || 'hi-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</span>
               </div>
             </div>
           ))
@@ -495,8 +505,8 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
     setTesting(true); setTestResult(null);
     try {
       const res = await fetch('/health', { signal: AbortSignal.timeout(3000) });
-      const ttsStatus = res.ok ? '✅ Neural TTS ready' : '⚠️ TTS unavailable';
-      const geminiStatus = form.geminiKey ? '✨ Cloud Key Authorized' : '⚪ Cloud Key Missing';
+      const ttsStatus = res.ok ? t('ttsReady') : t('ttsUnavailable');
+      const geminiStatus = form.geminiKey ? t('cloudKeyAuthorized') : t('cloudKeyMissing');
       setTestResult({ ok: true, msg: `${geminiStatus}\n${ttsStatus}` });
     } catch (e) {
       setTestResult({ ok: false, msg: `${t('connectFail')}: ${e.message}` });
@@ -508,11 +518,22 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
     const cfg = { ...form };
     setAiCfg(cfg);
     lsSet('gram_ai', cfg);
-    onToast(`AI Engine set to ${cfg.engine.toUpperCase()}`);
+    onToast(t('aiEngineSetTo').replace('{engine}', cfg.engine.toUpperCase()));
   };
 
   const testSpeak = async (agentId) => {
-    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे.', en: 'Hello! I am GramSathi AI.' };
+    const demo = {
+      hi: 'नमस्ते! मैं ग्राम साथी AI हूं।',
+      mr: 'नमस्कार! मी ग्राम साथी AI आहे।',
+      en: 'Hello! I am GramSathi AI.',
+      bn: 'নমস্কার! আমি গ্রাম সাথী AI।',
+      ta: 'வணக்கம்! நான் கிராம் சாத்தி AI.',
+      te: 'నమస్కారం! నేను గ్రామ సాథీ AI.',
+      gu: 'નમસ્તે! હું ગ્રામ સાથી AI છું.',
+      kn: 'ನಮಸ್ಕಾರ! ನಾನು ಗ್ರಾಮ ಸಾಥಿ AI.',
+      ml: 'നമസ്കാരം! ഞാൻ ഗ്രാം സാതി AI ആണ്.',
+      pa: 'ਸਤ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ ਗ੍ਰਾਮ ਸਾਥੀ AI ਹਾਂ।',
+    };
     const text = demo[lang] || demo.hi;
     try {
       const gender = VOICE_AGENTS[agentId]?.genderPref === 'female' ? 'female' : 'male';
@@ -530,19 +551,19 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
       <div className="settings-screen">
         {/* AI Engine Selection */}
         <div className="settings-card">
-          <div className="sc-title">🧠 AI Engine Setup</div>
+          <div className="sc-title">🧠 {t('aiEngineSetup')}</div>
           
           <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-            <label className="sc-label" style={{ marginBottom: 10 }}>Select Primary Engine</label>
+            <label className="sc-label" style={{ marginBottom: 10 }}>{t('selectPrimaryEngine')}</label>
             <div className="lang-group" style={{ marginBottom: 16 }}>
-              <button className={`lang-pill ${form.engine === 'local' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'local' }))}>Local</button>
-              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>GramSathi Cloud</button>
+              <button className={`lang-pill ${form.engine === 'local' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'local' }))}>{t('localEngine')}</button>
+              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>{t('cloudEngine')}</button>
             </div>
           </div>
 
           {form.engine === 'gemini' && (
             <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginBottom: 16 }}>
-              <label className="sc-label" style={{ marginBottom: 6 }}>✨ GramSathi Cloud API Key</label>
+              <label className="sc-label" style={{ marginBottom: 6 }}>✨ {t('cloudApiKey')}</label>
               <input 
                 type="password" 
                 className="sc-input" 
@@ -551,7 +572,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
                 placeholder="AIzaSy..." 
                 style={{ width:'100%', padding:'8px 12px', borderRadius:'var(--r-md)', border:'1px solid var(--border)' }}
               />
-              <div style={{ fontSize:'0.7rem', color:'var(--txt3)', marginTop:4 }}>Used only locally.</div>
+              <div style={{ fontSize:'0.7rem', color:'var(--txt3)', marginTop:4 }}>{t('usedOnlyLocally')}</div>
             </div>
           )}
 
@@ -559,7 +580,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
             <button className="sc-btn secondary w-full" onClick={testConnection} disabled={testing}>
               {testing ? t('testing') : t('testBtn')}
             </button>
-            <button className="sc-btn primary w-full" onClick={save}>💾 Save Settings</button>
+            <button className="sc-btn primary w-full" onClick={save}>💾 {t('saveSettings')}</button>
           </div>
           {testResult && <div className={`test-result ${testResult.ok ? 'ok' : 'err'}`}>{testResult.msg}</div>}
         </div>
@@ -584,23 +605,23 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
             ))}
           </div>
           <div style={{ marginTop:12, fontSize:'0.72rem', color:'var(--txt3)' }}>
-            💡 Click a voice card to hear a preview.
+            {t('voicePreviewHint')}
           </div>
         </div>
 
         {/* Data / Privacy */}
         <div className="settings-card">
-          <div className="sc-title">🔒 Privacy</div>
+          <div className="sc-title">🔒 {t('privacyTitle')}</div>
           <div style={{ fontSize:'0.82rem', color:'var(--txt2)', lineHeight:1.7 }}>
-            • All data stored locally on your device<br />
-            • No user data sent to cloud<br />
-            • Ollama runs on friend's LAN laptop only<br />
-            • Browser voice synthesis is fully offline<br />
-            • Delete all data below
+            • {t('privacyPoint1')}<br />
+            • {t('privacyPoint2')}<br />
+            • {t('privacyPoint3')}<br />
+            • {t('privacyPoint4')}<br />
+            • {t('privacyPoint5')}
           </div>
         <button className="sc-btn mt-12 w-full" style={{ background:'rgba(220,38,38,0.08)', color:'var(--err)', border:'1px solid rgba(220,38,38,0.2)' }}
             onClick={() => { lsSet('gram_hist', []); lsSet('gram_ai', {}); onToast(t('sessionCleared')); }}>
-            🗑️ Clear All Local Data
+            🗑️ {t('clearLocalData')}
           </button>
         </div>
       </div>
@@ -612,7 +633,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
    SIDEBAR (desktop only)
 ═══════════════════════════════════════════════════════════════════ */
 function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModule, voiceAgent, setVoiceAgent, aiCfg }) {
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : 'Local Simulated AI';
+  const engineLabel = aiCfg.engine === 'gemini' ? t('cloudEngine') : t('localSimulatedAI');
   return (
     <aside className="sidebar">
       {/* Nav */}
@@ -676,7 +697,7 @@ function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModu
 
         {/* AI Status */}
         <div className="sidebar-section">
-          <div className="sidebar-section-title">AI Engine</div>
+          <div className="sidebar-section-title">{t('aiEngineStatus')}</div>
           <div className={`ollama-badge ${aiCfg.engine === 'gemini' ? 'ok' : 'sim'}`} style={{ width:'100%', justifyContent:'center', borderRadius:'var(--r-md)', padding:'7px 12px' }}>
             <span className="dot" />
             {engineLabel}
@@ -755,7 +776,7 @@ export default function App() {
     return null;
   };
 
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : t('simulation');
+  const engineLabel = aiCfg.engine === 'gemini' ? t('cloudEngine') : t('simulation');
 
   return (
     <div className="app-shell">
@@ -777,13 +798,20 @@ export default function App() {
             {engineLabel}
           </div>
 
-          {/* Language toggle */}
-          <div className="lang-group">
-            {Object.entries(LANGS).map(([k, label]) => (
-              <button key={k} id={`lang-${k}`} className={`lang-pill ${lang === k ? 'active' : ''}`} onClick={() => setLang(k)}>
-                {label}
-              </button>
-            ))}
+          {/* Language dropdown */}
+          <div className="lang-select-wrap">
+            <label htmlFor="language-select" className="sr-only">{t('language')}</label>
+            <select
+              id="language-select"
+              className="lang-select"
+              value={lang}
+              onChange={(e) => setLang(e.target.value)}
+              aria-label={t('language')}
+            >
+              {Object.entries(LANGS).map(([k, meta]) => (
+                <option key={k} value={k}>{meta.name}</option>
+              ))}
+            </select>
           </div>
 
           {/* Settings shortcut */}

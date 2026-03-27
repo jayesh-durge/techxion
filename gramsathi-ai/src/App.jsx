@@ -610,7 +610,7 @@ function HistoryScreen({ lang, t, onReplay }) {
 /* ═══════════════════════════════════════════════════════════════════
    SETTINGS SCREEN
 ═══════════════════════════════════════════════════════════════════ */
-function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, voices, onToast }) {
+function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, voices, onToast, installPrompt, onInstall }) {
   const [form, setForm] = useState({ engine: aiCfg.engine, geminiKey: aiCfg.geminiKey });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -677,6 +677,23 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
             💡 Click a voice card to hear a preview.
           </div>
         </div>
+
+        {/* PWA App Install */}
+        {installPrompt && (
+          <div className="settings-card" style={{ background: 'linear-gradient(135deg, rgba(14,165,233,0.1), rgba(16,185,129,0.1))', borderColor: 'var(--green-light)' }}>
+            <div className="sc-title" style={{ color: '#0284c7' }}>📱 Install GramSathi App</div>
+            <div style={{ fontSize:'0.82rem', color:'var(--txt2)', lineHeight:1.7, marginBottom: 16 }}>
+              Install GramSathi locally to your home screen for full offline voice engines and instant one-tap access.
+            </div>
+            <button 
+              className="sc-btn w-full" 
+              style={{ background: 'linear-gradient(135deg, #0284c7, #10b981)', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontWeight: 'bold', boxShadow: '0 4px 14px rgba(16,185,129,0.3)', cursor: 'pointer' }}
+              onClick={onInstall}
+            >
+              🚀 Install App to Home Screen
+            </button>
+          </div>
+        )}
 
         {/* Data / Privacy */}
         <div className="settings-card">
@@ -764,6 +781,19 @@ export default function App() {
     ...lsGet('gram_ai', {}),
   }));
   const toastTimer = useRef(null);
+  
+  // Custom PWA Install State
+  const [installPrompt, setInstallPrompt] = useState(null);
+
+  // Catch PWA Install Prompt
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
   // Load browser voices on mount
   useEffect(() => {
@@ -812,7 +842,13 @@ export default function App() {
     if (activeTab === 'home')     return <HomeScreen    lang={lang} t={t} onModuleSelect={handleModuleSelect} voices={voices} voiceAgent={voiceAgent} aiCfg={aiCfg} />;
     if (activeTab === 'services') return <ServicesScreen lang={lang} t={t} onModuleSelect={handleModuleSelect} />;
     if (activeTab === 'history')  return <HistoryScreen lang={lang} t={t} onReplay={handleReplay} />;
-    if (activeTab === 'settings') return <SettingsScreen lang={lang} t={t} aiCfg={aiCfg} setAiCfg={setAiCfg} voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent} voices={voices} onToast={showToast} />;
+    if (activeTab === 'settings') return <SettingsScreen 
+        lang={lang} t={t} aiCfg={aiCfg} setAiCfg={setAiCfg} 
+        voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent} 
+        voices={voices} onToast={showToast} 
+        installPrompt={installPrompt} 
+        onInstall={() => { if(installPrompt) installPrompt.prompt(); }} 
+      />;
     return null;
   };
 

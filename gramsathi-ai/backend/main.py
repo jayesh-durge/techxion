@@ -427,19 +427,43 @@ async def process_query(req: QueryRequest):
             response_text = await call_gemini(prompt, gemini_key)
             sources = local["sources"] + ["GramSathi Cloud AI"]
         except Exception as e:
-            print(f"Cloud AI call failed: {e}")
-            # Only show local KB answer if it's not the generic fallback
-            if local["sources"]:
-                response_text = local["text"]
-                sources = local["sources"]
-            else:
-                fallback_msgs = {
-                    "hi": "माफ करें, अभी जवाब देने में दिक्कत हो रही है। थोड़ी देर बाद फिर कोशिश करें।",
-                    "mr": "क्षमा करा, आत्ता उत्तर देण्यात अडचण येत आहे. थोड्या वेळाने पुन्हा प्रयत्न करा.",
-                    "en": "Sorry, there is a temporary issue. Please try again in a moment."
-                }
-                response_text = fallback_msgs.get(req.language, fallback_msgs["hi"])
-                sources = []
+            print(f"Gemini AI call failed: {e}")
+            
+            # ── SARVAM AI FALLBACK ──
+            sarvam_key = os.getenv("SARVAM_API_KEY")
+            success_sarvam = False
+            
+            if sarvam_key:
+                print("Falling back to Sarvam AI (sarvam-30b)...")
+                try:
+                    from sarvamai import SarvamAI
+                    client = SarvamAI(api_subscription_key=sarvam_key)
+                    
+                    sr_resp = client.chat.completions(
+                        model="sarvam-30b",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.5,
+                        top_p=1,
+                        max_tokens=600,
+                    )
+                    response_text = sr_resp.choices[0].message.content.strip()
+                    sources = local["sources"] + ["GramSathi (Sarvam Fallback)"]
+                    success_sarvam = True
+                except Exception as sarvam_err:
+                    print(f"Sarvam fallback failed: {sarvam_err}")
+
+            if not success_sarvam:
+                if local["sources"]:
+                    response_text = local["text"]
+                    sources = local["sources"]
+                else:
+                    fallback_msgs = {
+                        "hi": "माफ करें, अभी जवाब देने में दिक्कत हो रही है। थोड़ी देर बाद फिर कोशिश करें।",
+                        "mr": "क्षमा करा, आत्ता उत्तर देण्यात अडचण येत आहे. थोड्या वेळाने पुन्हा प्रयत्न करा.",
+                        "en": "Sorry, there is a temporary issue. Please try again in a moment."
+                    }
+                    response_text = fallback_msgs.get(req.language, fallback_msgs["hi"])
+                    sources = []
     else:
         # No API key at all — use local KB if available, else helpful message
         if local["sources"]:

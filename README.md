@@ -1,56 +1,79 @@
-# GramSathi AI 🌿
+# GramSathi AI 🌿 — Empowering Rural India
+*A highly scalable, multi-lingual, and completely Voice-First intelligent assistant designed exclusively for the agricultural, healthcare, governance, and educational sectors of rural India.*
 
-**Open, Voice-First, Privacy-First Handheld AI for Rural India**
+---
 
-A multilingual AI assistant (Hindi / Marathi / English) for rural communities — works offline, runs locally, and never sends your data to the cloud.
+## 🚀 Key Features
 
-## Features
-- 🎙️ Voice-first interaction (Web Speech API)
-- 🏛️ Government Schemes (PM Kisan, MNREGA, Ayushman Bharat)
-- 🌾 Farming Assistant (crops, pests, fertilizer, irrigation)
-- 🏥 Health Guidance (symptoms, home remedies, when to see doctor)
-- 📖 Education Helper (Math, Science in simple language)
-- 🤖 Ollama LLM integration (connect local AI model over LAN)
-- 🔒 100% Privacy — all data stays on your device
-- 🌐 Desktop + Mobile responsive
+*   🎙️ **100% Voice-First Interface:** Zero-typing UI. Simply press the microphone, speak naturally (in Hindi, Marathi, or English), and the AI instantly responds with contextual voice audio.
+*   🛡️ **Deep Domain Isolation:** The AI physically refuses to answer off-topic queries, guaranteeing that village users receive highly accurate, actionable information explicitly mapped to their requested sector (Agriculture, Health, Edu, Govt).
+*   🌐 **Dual-Brain Fallback API:** Runs securely on **Google Gemini 1.5 Flash**. Should the primary cloud fail, the backend instantly intercepts the error and routes the exact context to **Sarvam AI (sarvam-30b)**. Zero downtime.
+*   📱 **Progressive Web App (PWA):** Easily installable to any local home screen directly from the browser window (`Add to Home Screen`), with completely off-grid offline local-database caching.
+*   🔒 **Zero-PII Secure Engine:** The API explicitly deletes and aggressively scrubs sensitive PII (Aadhaar Data, Phone Numbers) using Regular Expressions before any payload hits cloud endpoints.
+*   🎨 **Premium Glassmorphism:** Features a highly optimized `100dvh` CSS layout rendering absolute Frosted Glass panels against an infinite natural-moving gradient, maximizing visual engagement globally without external CSS/JS bloatware.
 
-## Setup
+---
 
-### Frontend
-```bash
-cd gramsathi-ai
-npm install
-npm run dev        # → http://localhost:3002
-```
+## 🛠️ Technology Stack
+### Frontend (React + Vite)
+*   **Core:** React 18, Vite (HMR)
+*   **Styling:** Pure Modern CSS-in-JS Variables, Dynamic Glassmorphic Viewports
+*   **Build/Offline:** Vite-Plugin-PWA (Progressive Web Application standard)
+*   **Audio Pipeline:** `window.SpeechRecognition` (STT Input)
 
-### Backend (Python FastAPI + SQLite)
-```bash
-cd gramsathi-ai/backend
-pip install -r requirements.txt
-python main.py     # → http://localhost:8000
-```
+### Backend (Python + FastAPI)
+*   **Core:** Python 3.10+, FastAPI (ASGI Asynchronous Routing), Uvicorn
+*   **Database:** `sqlite3` natively handling session recall and caching mechanisms
+*   **Inference APIs:** Google Gemini SDK, `sarvamai` (Fallback pipeline)
+*   **Audio Pipeline:** `gTTS` (Response Output)
 
-### Ollama (Optional — for real LLM responses)
-On the Ollama server laptop:
-```cmd
-set OLLAMA_HOST=0.0.0.0
-set OLLAMA_ORIGINS=*
-ollama pull gemma3:4b
-ollama serve
-```
+---
 
-Create `.env` in `gramsathi-ai/`:
-```
-VITE_OLLAMA_URL=http://<OLLAMA_LAPTOP_IP>:11434
-VITE_OLLAMA_MODEL=gemma3:4b
-```
+## ⚙️ Installation & Setup
 
-## Tech Stack
-- **Frontend**: React 18 + Vite, CSS (responsive)
-- **Backend**: Python FastAPI + SQLite
-- **AI**: Web Speech API (STT/TTS) + Ollama (local LLM)
-- **Languages**: Hindi (हिंदी), Marathi (मराठी), English
+1. **Clone the Repository:**
+   ```bash
+   git clone https://github.com/your-username/gramsathi-ai.git
+   cd gramsathi-ai
+   ```
 
-## Team
-Built for **Hackathon — Reimagining Open Voice-First Handheld AI**
-Domain: Artificial Intelligence | Problem Statement #5
+2. **Configure Environment Variables:**
+   Open the root `.env` file and strictly insert your API keys:
+   ```env
+   GEMINI_API_KEY=your_gemini_key_here
+   SARVAM_API_KEY=your_sarvam_key_here
+   VITE_OLLAMA_URL=http://localhost:11434
+   ```
+
+3. **Initialize the Python Backend:**
+   Open a terminal into the `/backend` folder.
+   ```bash
+   cd backend
+   pip install fastapi uvicorn google-genai sarvamai Pydantic gTTS python-dotenv
+   python main.py
+   ```
+   *The server dynamically creates `gramsathi.db` memory instances and spins up on `http://localhost:8000`.*
+
+4. **Initialize the React Frontend:**
+   Open a separate terminal in the root project folder.
+   ```bash
+   npm install --legacy-peer-deps
+   npm run dev
+   ```
+   *The blazing frontend will instantly boot on `http://localhost:3002`.*
+
+---
+
+## 📱 PWA Deployment Instructions
+If you want to install GramSathi natively to your mobile device:
+1. Since browsers tightly lock Progressive Web Apps to secure contexts, use a secure tunnel mapping to your laptop (e.g., `ngrok http 3002`).
+2. Open the secure `https` link on Chrome/Safari. 
+3. Open the **Settings Panel (⚙️)** in the application, and hit the blue **🚀 Install App** button!
+
+---
+
+## 👥 Contributors & Documentation
+*   Presentations? See the included **`gramsathi_ppt_content.md`** for immediate deck copy-paste.
+*   Code architecture breakdown? Read **`gramsathi_architecture.md`** for a strict line-by-line methodology of the Dual-Brain Python stack and CSS grids.
+
+*Engineered with precision for a connected, smarter future.*

@@ -183,9 +183,13 @@ button, input, select, textarea { font-family: var(--font); color: inherit; }
 /* ── Sidebar ────────────────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0;
-  background: transparent;
-  padding-right: 20px;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border-right: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 4px 0 32px rgba(15, 23, 42, 0.04);
   display: none; flex-direction: column; overflow: hidden;
+  z-index: 10;
+  border-bottom-right-radius: 28px;
 }
 .sidebar::-webkit-scrollbar { display: none; }
 @media (min-width: 760px) { .sidebar { display: flex; } }
@@ -422,32 +426,26 @@ button, input, select, textarea { font-family: var(--font); color: inherit; }
 @media (min-width: 760px) and (max-width: 1199px) { .module-grid { grid-template-columns: 1fr 1fr; } }
 
 .mod-card {
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--r-xl);
   padding: 18px 12px;
   display: flex; flex-direction: column; align-items: center; gap: 9px;
-  cursor: pointer; transition: all 0.22s ease; text-align: center;
-  box-shadow: 0 2px 6px var(--shadow);
+  cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); text-align: center;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
   position: relative; overflow: hidden;
 }
-.mod-card::after {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-.mod-card.govt::after   { background: var(--govt); }
-.mod-card.farm::after   { background: var(--farm); }
-.mod-card.health::after { background: var(--health); }
-.mod-card.edu::after    { background: var(--edu); }
+.mod-card.govt   { background: linear-gradient(135deg, rgba(255,247,237,0.7) 0%, rgba(255,255,255,0.3) 100%); border-top: 3px solid rgba(234,88,12,0.4); }
+.mod-card.farm   { background: linear-gradient(135deg, rgba(209,250,229,0.7) 0%, rgba(255,255,255,0.3) 100%); border-top: 3px solid rgba(16,185,129,0.4); }
+.mod-card.health { background: linear-gradient(135deg, rgba(255,228,230,0.7) 0%, rgba(255,255,255,0.3) 100%); border-top: 3px solid rgba(225,29,72,0.4); }
+.mod-card.edu    { background: linear-gradient(135deg, rgba(224,242,254,0.7) 0%, rgba(255,255,255,0.3) 100%); border-top: 3px solid rgba(37,99,235,0.4); }
+
 .mod-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 28px var(--shadow-m);
-  border-color: var(--border-m);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 16px 32px rgba(15,23,42,0.08);
+  border-color: rgba(255,255,255,0.9);
 }
-.mod-card.govt:hover   { background: var(--govt-bg); }
-.mod-card.farm:hover   { background: var(--farm-bg); }
-.mod-card.health:hover { background: var(--health-bg); }
-.mod-card.edu:hover    { background: var(--edu-bg); }
 .mc-icon { font-size: 2rem; }
 .mc-name { font-size: 0.82rem; font-weight: 700; color: var(--txt); line-height: 1.3; }
 .mc-desc { font-size: 0.64rem; color: var(--txt3); line-height: 1.4; }

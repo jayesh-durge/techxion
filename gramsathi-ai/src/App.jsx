@@ -134,7 +134,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) 
           query,
           module: moduleId,
           language: lang,
-          ai_engine: aiCfg.engine,
+          ai_engine: 'gemini', // Enforce cloud automatically
           gemini_key: aiCfg.geminiKey,
         }),
         signal: AbortSignal.timeout(60000),
@@ -318,54 +318,152 @@ function ChatInputRow({ input, setInput, onSend, lang, t, thinking, onExtMicResu
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   HOME SCREEN
+   HOME SCREEN — Two-way voice channel
+   User speaks → STT → Gemini → TTS
 ═══════════════════════════════════════════════════════════════════ */
-function HomeScreen({ lang, t, onModuleSelect, voices, voiceAgent }) {
+function HomeScreen({ lang, t, onModuleSelect, voices, voiceAgent, aiCfg }) {
   const [recording, setRecording] = useState(false);
-  const [input, setInput] = useState('');
+  const [thinking, setThinking] = useState(false);
+  const [userText, setUserText] = useState('');
+  const [aiText, setAiText] = useState('');
+  const [speaking, setSpeaking] = useState(false);
   const recRef = useRef(null);
+  const audioRef = useRef(null);
 
+  // Detect module from text
+  const detectModule = (txt) => {
+    const lower = txt.toLowerCase();
+    if (/सरकार|योजना|mnrega|किसान|ayushman|pmkisan|scheme|ration/.test(lower)) return 'govt';
+    if (/फसल|बीज|खाद|कीट|crop|farm|शेती|पिक|fertilizer/.test(lower)) return 'farm';
+    if (/बुखार|fever|दस्त|खांसी|health|आरोग्य|dengue|डेंगू|medicine/.test(lower)) return 'health';
+    return 'edu';
+  };
+
+  // Step 3: TTS — play the AI response
+  const playTTS = async (text) => {
+    try {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      const gender = VOICE_AGENTS[voiceAgent]?.genderPref === 'female' ? 'female' : 'male';
+      const url = `/api/tts?text=${encodeURIComponent(text.substring(0, 550))}&lang=${lang}&gender=${gender}`;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setSpeaking(true);
+      audio.onended = () => setSpeaking(false);
+      audio.onerror = () => setSpeaking(false);
+      await audio.play();
+    } catch {
+      setSpeaking(false);
+    }
+  };
+
+  // Step 2: send transcribed text to Gemini
+  const sendToGemini = async (query) => {
+    setThinking(true);
+    setAiText('');
+    try {
+      const module = detectModule(query);
+      const res = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          module,
+          language: lang,
+          ai_engine: 'gemini',
+          gemini_key: aiCfg?.geminiKey || '',
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await res.json();
+      const answer = data.response || data.detail || 'No response';
+      setAiText(answer);
+      await playTTS(answer);
+    } catch (e) {
+      const err = 'Connection error. Please try again.';
+      setAiText(err);
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  // Step 1: STT via browser SpeechRecognition
   const startRec = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert(t('noSpeechSupport')); return; }
-    const r = new SR();
-    r.lang = LANG_CODES[lang] || 'hi-IN';
-    r.onstart  = () => setRecording(true);
-    r.onend    = () => setRecording(false);
-    r.onerror  = () => setRecording(false);
-    r.onresult = (e) => {
-      const txt = e.results[0][0].transcript;
-      // Auto-route to module
-      const lower = txt.toLowerCase();
-      const modId =
-        /सरकार|योजना|mnrega|किसान|ayushman|scheme/.test(lower) ? 'govt' :
-        /फसल|बीज|खाद|कीट|crop|farm|शेती/.test(lower)           ? 'farm' :
-        /बुखार|fever|दस्त|खांसी|health|आरोग्य/.test(lower)       ? 'health' : 'edu';
-      onModuleSelect(modId, txt);
-    };
-    r.start();
-    recRef.current = r;
+    if (!SR) { alert('Speech recognition not supported on this browser.'); return; }
+    try {
+      const r = new SR();
+      r.lang = LANG_CODES[lang] || 'hi-IN';
+      r.onstart  = () => { setRecording(true); setUserText(''); setAiText(''); };
+      r.onend    = () => setRecording(false);
+      r.onerror  = (e) => { setRecording(false); console.warn('STT error', e); };
+      r.onresult = (e) => {
+        const txt = e.results[0][0].transcript;
+        setUserText(txt);
+        sendToGemini(txt);
+      };
+      r.start();
+      recRef.current = r;
+    } catch {
+      alert('Microphone access denied or unavailable.');
+    }
   };
+
   const stopRec = () => { recRef.current?.stop(); setRecording(false); };
   const toggleMic = () => recording ? stopRec() : startRec();
 
   return (
     <div className="screen-scroll scrollable">
       <div className="home-screen">
-        {/* Mic hero */}
+        {/* ── Mic hero ── */}
         <div className="mic-hero">
-          <div className="mic-hero-label">{t('tapToSpeak')}</div>
+          <div className="mic-hero-label">
+            {speaking ? '🔊 ' + (t('speaking') || 'GramSathi speaking...') :
+             thinking ? '🤔 ' + (t('thinking') || 'Thinking...') :
+             recording ? '👂 ' + (t('listening') || 'Listening...') :
+             t('tapToSpeak')}
+          </div>
           <div className="mic-wrap">
-            <div className="mic-ring" />
-            <div className="mic-ring" />
-            <button id="home-mic-btn" className={`mic-btn ${recording ? 'rec' : ''}`} onClick={toggleMic}>
-              {recording ? '⏹️' : '🎙️'}
+            <div className={`mic-ring ${recording || thinking || speaking ? 'active' : ''}`} />
+            <div className={`mic-ring ${recording ? 'active' : ''}`} />
+            <button
+              id="home-mic-btn"
+              className={`mic-btn ${recording ? 'rec' : ''} ${thinking || speaking ? 'busy' : ''}`}
+              onClick={toggleMic}
+              disabled={thinking || speaking}
+            >
+              {thinking ? '⌛' : speaking ? '🔊' : recording ? '⏹️' : '🎙️'}
             </button>
           </div>
-          {recording
-            ? <div className="waveform">{[1,2,3,4,5,6].map(i=><div key={i} className="wv"/>)}</div>
-            : <div className="mic-status">{recording ? t('listening') : t('tapToSpeak')}</div>
-          }
+
+          {recording && (
+            <div className="waveform">{[1,2,3,4,5,6].map(i=><div key={i} className="wv"/>)}</div>
+          )}
+
+          {/* Voice conversation bubbles */}
+          {(userText || aiText || thinking) && (
+            <div className="voice-convo">
+              {userText && (
+                <div className="vc-bubble user">
+                  <span className="vc-icon">👤</span>
+                  <div className="vc-text">{userText}</div>
+                </div>
+              )}
+              {thinking && (
+                <div className="vc-bubble ai thinking">
+                  <span className="vc-icon">🌿</span>
+                  <div className="vc-text">
+                    <span className="dot-loader"><span/><span/><span/></span>
+                  </div>
+                </div>
+              )}
+              {aiText && !thinking && (
+                <div className={`vc-bubble ai ${speaking ? 'speaking' : ''}`}>
+                  <span className="vc-icon">🌿</span>
+                  <div className="vc-text">{aiText}</div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Module grid */}
@@ -528,41 +626,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
   return (
     <div className="screen-scroll scrollable">
       <div className="settings-screen">
-        {/* AI Engine Selection */}
-        <div className="settings-card">
-          <div className="sc-title">🧠 AI Engine Setup</div>
-          
-          <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-            <label className="sc-label" style={{ marginBottom: 10 }}>Select Primary Engine</label>
-            <div className="lang-group" style={{ marginBottom: 16 }}>
-              <button className={`lang-pill ${form.engine === 'local' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'local' }))}>Local</button>
-              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>GramSathi Cloud</button>
-            </div>
-          </div>
-
-          {form.engine === 'gemini' && (
-            <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginBottom: 16 }}>
-              <label className="sc-label" style={{ marginBottom: 6 }}>✨ GramSathi Cloud API Key</label>
-              <input 
-                type="password" 
-                className="sc-input" 
-                value={form.geminiKey || ''} 
-                onChange={e => setForm(f => ({...f, geminiKey: e.target.value}))} 
-                placeholder="AIzaSy..." 
-                style={{ width:'100%', padding:'8px 12px', borderRadius:'var(--r-md)', border:'1px solid var(--border)' }}
-              />
-              <div style={{ fontSize:'0.7rem', color:'var(--txt3)', marginTop:4 }}>Used only locally.</div>
-            </div>
-          )}
-
-          <div className="flex-center gap-8" style={{ flexDirection:'column', marginTop: 12 }}>
-            <button className="sc-btn secondary w-full" onClick={testConnection} disabled={testing}>
-              {testing ? t('testing') : t('testBtn')}
-            </button>
-            <button className="sc-btn primary w-full" onClick={save}>💾 Save Settings</button>
-          </div>
-          {testResult && <div className={`test-result ${testResult.ok ? 'ok' : 'err'}`}>{testResult.msg}</div>}
-        </div>
+        {/* AI Engine Selection hidden for presentation */}
 
         {/* Voice agents */}
         <div className="settings-card">
@@ -672,16 +736,7 @@ function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModu
           </div>
         </div>
 
-        <div className="sidebar-divider" />
-
-        {/* AI Status */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">AI Engine</div>
-          <div className={`ollama-badge ${aiCfg.engine === 'gemini' ? 'ok' : 'sim'}`} style={{ width:'100%', justifyContent:'center', borderRadius:'var(--r-md)', padding:'7px 12px' }}>
-            <span className="dot" />
-            {engineLabel}
-          </div>
-        </div>
+        {/* AI Status Hidden */}
       </div>
     </aside>
   );
@@ -748,7 +803,7 @@ export default function App() {
         />
       );
     }
-    if (activeTab === 'home')     return <HomeScreen    lang={lang} t={t} onModuleSelect={handleModuleSelect} voices={voices} voiceAgent={voiceAgent} />;
+    if (activeTab === 'home')     return <HomeScreen    lang={lang} t={t} onModuleSelect={handleModuleSelect} voices={voices} voiceAgent={voiceAgent} aiCfg={aiCfg} />;
     if (activeTab === 'services') return <ServicesScreen lang={lang} t={t} onModuleSelect={handleModuleSelect} />;
     if (activeTab === 'history')  return <HistoryScreen lang={lang} t={t} onReplay={handleReplay} />;
     if (activeTab === 'settings') return <SettingsScreen lang={lang} t={t} aiCfg={aiCfg} setAiCfg={setAiCfg} voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent} voices={voices} onToast={showToast} />;
@@ -771,11 +826,7 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
-          {/* AI status badge */}
-          <div className={`ollama-badge ${aiCfg.engine === 'gemini' ? 'ok' : 'sim'} hide-mobile`}>
-            <span className="dot" />
-            {engineLabel}
-          </div>
+          {/* AI Status Badge omitted to white-label */}
 
           {/* Language toggle */}
           <div className="lang-group">

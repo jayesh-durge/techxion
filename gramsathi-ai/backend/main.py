@@ -10,6 +10,11 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 import sqlite3, json, datetime, os, re, io, asyncio
+from dotenv import load_dotenv
+
+# Load .env from parent directory explicitly (backend runs in /backend subdir)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
+load_dotenv(_env_path)
 
 app = FastAPI(title="GramSathi AI Backend", version="2.0.0")
 
@@ -372,12 +377,13 @@ def build_rural_prompt(query: str, module: str, lang: str, context: str) -> str:
 
     return f"""You are GramSathi AI — a friendly voice assistant for rural communities in India.
 
-Your role: Help with {module_ctx}.
+Your assigned domain is STRICTLY: {module_ctx}.
 
 STRICT RULES:
-1. Reply ONLY in {lang_label} language. Do not mix languages.
-2. Use very SIMPLE words — as if explaining to a farmer or village person who has basic education.
-3. Be CONCISE — under 150 words.
+1. If the user's question is NOT about {module_ctx}, you MUST REFUSE to answer. Politely tell them to "ask this question in the correct section of the GramSathi app" (translate this to {lang_label}). DO NOT answer off-topic questions!
+2. Reply ONLY in {lang_label} language. Do not mix languages.
+3. Use very SIMPLE words — as if explaining to a farmer or village person.
+4. Be CONCISE — under 150 words.
 4. Give PRACTICAL, ACTIONABLE advice — what they can do TODAY.
 5. If health-related: always say "डॉक्टर को दिखाएं" (see a doctor) for serious issues.
 6. Use emojis sparingly (1-2 max) to make it friendly.
@@ -409,27 +415,44 @@ async def process_query(req: QueryRequest):
     q = re.sub(r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[AADHAAR]', req.query)
     q = re.sub(r'\b[6-9]\d{9}\b', '[PHONE]', q)
 
-    # Always get local context
+    # Always get local context (used as enriched context for LLM, not as answer)
     local = find_answer(q, req.module, req.language)
-    prompt = build_rural_prompt(q, req.module, req.language, local["text"])
+    prompt = build_rural_prompt(q, req.module, req.language, local["text"] if local["sources"] else "")
 
-    if req.ai_engine == "gemini":
-        gemini_key = req.gemini_key or os.getenv("GEMINI_API_KEY")
-        if gemini_key:
-            try:
-                response_text = await call_gemini(prompt, gemini_key)
-                sources = local["sources"] + ["Google Gemini"]
-            except Exception as e:
-                print(f"Gemini call failed: {e}")
+    # Always prefer Gemini - try env key first, then request key
+    gemini_key = os.getenv("GEMINI_API_KEY") or req.gemini_key
+
+    if gemini_key:
+        try:
+            response_text = await call_gemini(prompt, gemini_key)
+            sources = local["sources"] + ["GramSathi Cloud AI"]
+        except Exception as e:
+            print(f"Cloud AI call failed: {e}")
+            # Only show local KB answer if it's not the generic fallback
+            if local["sources"]:
                 response_text = local["text"]
                 sources = local["sources"]
-        else:
+            else:
+                fallback_msgs = {
+                    "hi": "माफ करें, अभी जवाब देने में दिक्कत हो रही है। थोड़ी देर बाद फिर कोशिश करें।",
+                    "mr": "क्षमा करा, आत्ता उत्तर देण्यात अडचण येत आहे. थोड्या वेळाने पुन्हा प्रयत्न करा.",
+                    "en": "Sorry, there is a temporary issue. Please try again in a moment."
+                }
+                response_text = fallback_msgs.get(req.language, fallback_msgs["hi"])
+                sources = []
+    else:
+        # No API key at all — use local KB if available, else helpful message
+        if local["sources"]:
             response_text = local["text"]
             sources = local["sources"]
-
-    else: # local AI rules fallback
-        response_text = local["text"]
-        sources = local["sources"]
+        else:
+            key_msgs = {
+                "hi": "GramSathi Cloud AI चलाने के लिए API Key चाहिए। Settings में जाकर जोड़ें।",
+                "mr": "GramSathi Cloud AI चालवण्यासाठी API Key आवश्यक आहे. Settings मध्ये जा.",
+                "en": "Please add a Cloud AI key in Settings to get detailed answers."
+            }
+            response_text = key_msgs.get(req.language, key_msgs["hi"])
+            sources = []
 
     # Save to SQLite
     conn = get_db()

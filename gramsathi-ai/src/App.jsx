@@ -74,7 +74,7 @@ function Toggle({ checked, onChange }) {
 /* ═══════════════════════════════════════════════════════════════════
    MODULE CHAT SCREEN
 ═══════════════════════════════════════════════════════════════════ */
-function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg }) {
+function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) {
   const mod = MODULES[moduleId];
   const [msgs,     setMsgs]     = useState([]);
   const [input,    setInput]    = useState('');
@@ -89,7 +89,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
   const speakBackend = useCallback(async (text, idx) => {
     try {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-      const gender = ['dadi','doctor'].includes(voiceAgent) ? 'female' : 'male';
+      const gender = VOICE_AGENTS[voiceAgent]?.genderPref === 'female' ? 'female' : 'male';
       const url = `/api/tts?text=${encodeURIComponent(text.substring(0, 550))}&lang=${lang}&gender=${gender}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error('TTS backend unavailable');
@@ -120,7 +120,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
     setThinking(true);
 
     try {
-      // Route everything through FastAPI backend (handles local KB + Ollama + SQLite save)
+      // Route through FastAPI backend (handles local KB + Gemini + SQLite save)
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -128,9 +128,8 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
           query,
           module: moduleId,
           language: lang,
-          use_ollama: ollamaCfg.enabled,
-          ollama_url: import.meta.env.VITE_OLLAMA_URL || 'http://10.87.20.165:11434',
-          ollama_model: ollamaCfg.model || 'gemma3:4b',
+          ai_engine: aiCfg.engine,
+          gemini_key: aiCfg.geminiKey,
         }),
         signal: AbortSignal.timeout(60000),
       });
@@ -153,7 +152,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
       setMsgs(p => [...p, { role: 'ai', text: errText, sources: fallback?.sources || [] }]);
     }
     setThinking(false);
-  }, [thinking, moduleId, lang, ollamaCfg, speakBackend, msgs.length]);
+  }, [thinking, moduleId, lang, aiCfg, speakBackend, msgs.length]);
 
   const handleSpeak = (text, idx) => {
     if (speaking === idx) { stopSpeaking(); return; }
@@ -162,6 +161,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
 
   const sugg = mod.suggested[lang] || mod.suggested.hi;
   const modColor = `var(--${moduleId === 'edu' ? 'edu' : moduleId === 'health' ? 'health' : moduleId === 'govt' ? 'govt' : 'farm'})`;
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini' : t('simulation');
 
   return (
     <div className="module-screen">
@@ -173,7 +173,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, ollamaCfg
             {MODULES[moduleId]?.icon} {t(MODULE_KEYS[moduleId]?.name || 'allServices')}
           </div>
           <div className="mod-header-sub">
-            {ollamaCfg.enabled ? `🤖 ${ollamaCfg.model}` : t('simulation')} • {Object.keys(LANGS).find(k => k === lang) ? Object.values({ hi: 'हिंदी', mr: 'मराठी', en: 'English' })[Object.keys({ hi: 0, mr: 1, en: 2 })[lang]] : ''}
+            {engineLabel} • {Object.keys(LANGS).find(k => k === lang) ? Object.values({ hi: 'हिंदी', mr: 'मराठी', en: 'English' })[Object.keys({ hi: 0, mr: 1, en: 2 })[lang]] : ''}
           </div>
         </div>
         <div className="current-voice hide-mobile">
@@ -265,23 +265,50 @@ function ChatInputRow({ input, setInput, onSend, lang, t, thinking, onExtMicResu
   const [recording, setRecording] = useState(false);
   const recRef = useRef(null);
 
-  const startRec = () => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert(t('noSpeechSupport')); return; }
-    const r = new SR();
-    r.lang = LANG_CODES[lang] || 'hi-IN';
-    r.onstart  = () => setRecording(true);
-    r.onend    = () => setRecording(false);
-    r.onerror  = () => setRecording(false);
-    r.onresult = (e) => {
-      const txt = e.results[0][0].transcript;
-      setInput(txt);
-      onExtMicResult?.(txt);
-    };
-    r.start();
-    recRef.current = r;
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks = [];
+      rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      rec.onstop = async () => {
+        setRecording(false);
+        stream.getTracks().forEach(t => t.stop());
+        try {
+          setInput(t('recordingPlaceholder') + ' (Transcribing...)');
+          const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+          const formData = new FormData();
+          formData.append('file', blob, 'audio.webm');
+          const res = await fetch('/api/stt', { method: 'POST', body: formData });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+              setInput(data.text);
+              onExtMicResult?.(data.text);
+            } else setInput('');
+          } else {
+             setInput('');
+             alert("STT API Error");
+          }
+        } catch (e) {
+          setInput('');
+          alert("Transcription failed: " + e.message);
+        }
+      };
+      rec.start();
+      setRecording(true);
+      recRef.current = rec;
+    } catch (err) {
+      alert("Microphone access denied or unavailable.");
+    }
   };
-  const stopRec = () => { recRef.current?.stop(); setRecording(false); };
+
+  const stopRec = () => {
+    if (recRef.current && recording) {
+      recRef.current.stop();
+      setRecording(false);
+    }
+  };
 
   return (
     <div className={`input-row ${recording ? 'rec' : ''}`}>
@@ -470,31 +497,18 @@ function HistoryScreen({ lang, t, onReplay }) {
 /* ═══════════════════════════════════════════════════════════════════
    SETTINGS SCREEN
 ═══════════════════════════════════════════════════════════════════ */
-function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoiceAgent, voices, onToast }) {
-  const [form, setForm] = useState({ url: ollamaCfg.url, model: ollamaCfg.model, enabled: ollamaCfg.enabled });
+function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, voices, onToast }) {
+  const [form, setForm] = useState({ engine: aiCfg.engine, geminiKey: aiCfg.geminiKey });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
-  const [availModels, setAvailModels] = useState([]);
 
   const testConnection = async () => {
     setTesting(true); setTestResult(null);
     try {
-      // Test via backend proxy (avoids CORS) and check TTS
-      const [ollamaRes, ttsRes] = await Promise.allSettled([
-        fetch(`/api/ollama/models?url=${encodeURIComponent(DEFAULT_OLLAMA_URL)}`, { signal: AbortSignal.timeout(8000) }),
-        fetch('/health', { signal: AbortSignal.timeout(3000) }),
-      ]);
-      const ollamaData = ollamaRes.status === 'fulfilled' && ollamaRes.value.ok
-        ? await ollamaRes.value.json() : { connected: false, models: [] };
-      const ttsOk = ttsRes.status === 'fulfilled' && ttsRes.value.ok;
-      const models = ollamaData.models || [];
-      setAvailModels(models);
-      if (models.length && !models.includes(form.model)) setForm(f => ({ ...f, model: models[0] }));
-      const ollamaStatus = ollamaData.connected
-        ? `✅ Ollama: ${models.length} models (${models.slice(0,3).join(', ')})`
-        : `❌ Ollama: ${ollamaData.error || 'not reachable'}`;
-      const ttsStatus = ttsOk ? '✅ Neural TTS (edge-tts) ready' : '⚠️ TTS unavailable';
-      setTestResult({ ok: ollamaData.connected, msg: `${ollamaStatus}\n${ttsStatus}` });
+      const res = await fetch('/health', { signal: AbortSignal.timeout(3000) });
+      const ttsStatus = res.ok ? '✅ Neural TTS ready' : '⚠️ TTS unavailable';
+      const geminiStatus = form.geminiKey ? '✨ Gemini key provided' : '⚪ No Gemini key';
+      setTestResult({ ok: true, msg: `${geminiStatus}\n${ttsStatus}` });
     } catch (e) {
       setTestResult({ ok: false, msg: `${t('connectFail')}: ${e.message}` });
     }
@@ -503,16 +517,16 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
 
   const save = () => {
     const cfg = { ...form };
-    setOllamaCfg(cfg);
-    lsSet('gram_ollama', cfg);
-    onToast(cfg.enabled ? t('ollamaEnabled') : t('ollamaDisabled'));
+    setAiCfg(cfg);
+    lsSet('gram_ai', cfg);
+    onToast(`AI Engine set to ${cfg.engine.toUpperCase()}`);
   };
 
   const testSpeak = async (agentId) => {
-    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं। आपकी सेवा में हाज़िर हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे. आपली सेवा करण्यास तयार आहे.', en: 'Hello! I am GramSathi AI, your village assistant.' };
+    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे.', en: 'Hello! I am GramSathi AI, testing Sarvam voice.' };
     const text = demo[lang] || demo.hi;
     try {
-      const gender = ['dadi','doctor'].includes(agentId) ? 'female' : 'male';
+      const gender = VOICE_AGENTS[agentId]?.genderPref === 'female' ? 'female' : 'male';
       const res = await fetch(`/api/tts?text=${encodeURIComponent(text)}&lang=${lang}&gender=${gender}`, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error();
       const blob = await res.blob();
@@ -525,43 +539,40 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
   return (
     <div className="screen-scroll scrollable">
       <div className="settings-screen">
-        {/* Ollama config */}
+        {/* AI Engine Selection */}
         <div className="settings-card">
-          <div className="sc-title">🤖 {t('ollamaSection')}</div>
-          <div style={{ marginBottom:12 }} className="active-url-box">
-            🌐 {DEFAULT_OLLAMA_URL}
-            <div style={{ marginTop:4, fontSize:'0.65rem', color:'var(--green-mid)' }}>
-              Change in .env → VITE_OLLAMA_URL • restart npm run dev
+          <div className="sc-title">🧠 AI Engine Setup</div>
+          
+          <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+            <label className="sc-label" style={{ marginBottom: 10 }}>Select Primary Engine</label>
+            <div className="lang-group" style={{ marginBottom: 16 }}>
+              <button className={`lang-pill ${form.engine === 'local' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'local' }))}>Local</button>
+              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>Gemini API</button>
             </div>
           </div>
-          <div className="sc-row">
-            <label className="sc-label">{t('ollamaModel')}</label>
-            <select className="sc-select" value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))}>
-              {(availModels.length ? availModels : ['gemma3:4b','phi3:mini','llama3.2:3b','mistral:7b','gemma:2b']).map(m =>
-                <option key={m} value={m}>{m}</option>
-              )}
-            </select>
-          </div>
-          <div className="toggle-row sc-row">
-            <div className="toggle-label">
-              <div className="toggle-name">{t('enableOllama')}</div>
-              <div className="toggle-sub">{form.enabled ? t('ollamaEnabled') : t('ollamaDisabled')}</div>
+
+          {form.engine === 'gemini' && (
+            <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginBottom: 16 }}>
+              <label className="sc-label" style={{ marginBottom: 6 }}>✨ Gemini API Key</label>
+              <input 
+                type="password" 
+                className="sc-input" 
+                value={form.geminiKey || ''} 
+                onChange={e => setForm(f => ({...f, geminiKey: e.target.value}))} 
+                placeholder="AIzaSy..." 
+                style={{ width:'100%', padding:'8px 12px', borderRadius:'var(--r-md)', border:'1px solid var(--border)' }}
+              />
+              <div style={{ fontSize:'0.7rem', color:'var(--txt3)', marginTop:4 }}>Used only locally.</div>
             </div>
-            <Toggle checked={form.enabled} onChange={v => setForm(f => ({ ...f, enabled: v }))} />
-          </div>
-          <div className="flex-center gap-8" style={{ flexDirection:'column' }}>
+          )}
+
+          <div className="flex-center gap-8" style={{ flexDirection:'column', marginTop: 12 }}>
             <button className="sc-btn secondary w-full" onClick={testConnection} disabled={testing}>
               {testing ? t('testing') : t('testBtn')}
             </button>
             <button className="sc-btn primary w-full" onClick={save}>💾 Save Settings</button>
           </div>
-          {testResult && (
-            <div className={`test-result ${testResult.ok ? 'ok' : 'err'}`}>{testResult.msg}</div>
-          )}
-          <div style={{ marginTop:14, padding:'10px 12px', background:'var(--amber-bg)', border:'1px solid rgba(200,123,15,0.2)', borderRadius:'var(--r-md)', fontSize:'0.75rem', color:'var(--amber)' }}>
-            <strong>📋 On friend's laptop:</strong><br />
-            <code>set OLLAMA_HOST=0.0.0.0 &amp;&amp; set OLLAMA_ORIGINS=* &amp;&amp; ollama serve</code>
-          </div>
+          {testResult && <div className={`test-result ${testResult.ok ? 'ok' : 'err'}`}>{testResult.msg}</div>}
         </div>
 
         {/* Voice agents */}
@@ -598,8 +609,8 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
             • Browser voice synthesis is fully offline<br />
             • Delete all data below
           </div>
-          <button className="sc-btn mt-12 w-full" style={{ background:'rgba(220,38,38,0.08)', color:'var(--err)', border:'1px solid rgba(220,38,38,0.2)' }}
-            onClick={() => { lsSet('gram_hist', []); lsSet('gram_ollama', {}); onToast(t('sessionCleared')); }}>
+        <button className="sc-btn mt-12 w-full" style={{ background:'rgba(220,38,38,0.08)', color:'var(--err)', border:'1px solid rgba(220,38,38,0.2)' }}
+            onClick={() => { lsSet('gram_hist', []); lsSet('gram_ai', {}); onToast(t('sessionCleared')); }}>
             🗑️ Clear All Local Data
           </button>
         </div>
@@ -611,7 +622,8 @@ function SettingsScreen({ lang, t, ollamaCfg, setOllamaCfg, voiceAgent, setVoice
 /* ═══════════════════════════════════════════════════════════════════
    SIDEBAR (desktop only)
 ═══════════════════════════════════════════════════════════════════ */
-function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModule, voiceAgent, setVoiceAgent, ollamaCfg }) {
+function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModule, voiceAgent, setVoiceAgent, aiCfg }) {
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini API' : 'Local Simulated AI';
   return (
     <aside className="sidebar">
       {/* Nav */}
@@ -673,18 +685,13 @@ function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModu
 
         <div className="sidebar-divider" />
 
-        {/* Ollama status */}
+        {/* AI Status */}
         <div className="sidebar-section">
-          <div className="sidebar-section-title">Ollama AI</div>
-          <div className={`ollama-badge ${ollamaCfg.enabled ? 'ok' : 'sim'}`} style={{ width:'100%', justifyContent:'center', borderRadius:'var(--r-md)', padding:'7px 12px' }}>
+          <div className="sidebar-section-title">AI Engine</div>
+          <div className={`ollama-badge ${aiCfg.engine === 'gemini' ? 'ok' : 'sim'}`} style={{ width:'100%', justifyContent:'center', borderRadius:'var(--r-md)', padding:'7px 12px' }}>
             <span className="dot" />
-            {ollamaCfg.enabled ? `🤖 ${ollamaCfg.model}` : t('simulation')}
+            {engineLabel}
           </div>
-          {ollamaCfg.enabled && (
-            <div style={{ fontSize:'0.65rem', color:'var(--txt3)', marginTop:5, textAlign:'center' }}>
-              → {DEFAULT_OLLAMA_URL}
-            </div>
-          )}
         </div>
       </div>
     </aside>
@@ -698,14 +705,13 @@ export default function App() {
   const [lang,         setLang]         = useState(() => lsGet('gram_lang', 'hi'));
   const [activeTab,    setActiveTab]    = useState('home');
   const [activeModule, setActiveModule] = useState(null);
-  const [voiceAgent,   setVoiceAgent]   = useState(() => lsGet('gram_voice', 'ramu'));
+  const [voiceAgent,   setVoiceAgent]   = useState(() => lsGet('gram_voice', 'shubh'));
   const [voices,       setVoices]       = useState([]);
   const [toast,        setToast]        = useState('');
-  const [ollamaCfg,    setOllamaCfg]    = useState(() => ({
-    enabled: false,
-    url: DEFAULT_OLLAMA_URL,
-    model: DEFAULT_OLLAMA_MODEL,
-    ...lsGet('gram_ollama', {}),
+  const [aiCfg,        setAiCfg]        = useState(() => ({
+    engine: 'gemini', // 'local' or 'gemini'
+    geminiKey: '',
+    ...lsGet('gram_ai', {}),
   }));
   const toastTimer = useRef(null);
 
@@ -741,23 +747,25 @@ export default function App() {
   const renderMain = () => {
     if (activeModule && activeTab === 'module') {
       return (
-        <ModuleScreen
+          <ModuleScreen
           moduleId={activeModule}
           lang={lang}
           t={t}
           onBack={handleBack}
           voices={voices}
           voiceAgent={voiceAgent}
-          ollamaCfg={ollamaCfg}
+          aiCfg={aiCfg}
         />
       );
     }
     if (activeTab === 'home')     return <HomeScreen    lang={lang} t={t} onModuleSelect={handleModuleSelect} voices={voices} voiceAgent={voiceAgent} />;
     if (activeTab === 'services') return <ServicesScreen lang={lang} t={t} onModuleSelect={handleModuleSelect} />;
     if (activeTab === 'history')  return <HistoryScreen lang={lang} t={t} onReplay={handleReplay} />;
-    if (activeTab === 'settings') return <SettingsScreen lang={lang} t={t} ollamaCfg={ollamaCfg} setOllamaCfg={setOllamaCfg} voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent} voices={voices} onToast={showToast} />;
+    if (activeTab === 'settings') return <SettingsScreen lang={lang} t={t} aiCfg={aiCfg} setAiCfg={setAiCfg} voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent} voices={voices} onToast={showToast} />;
     return null;
   };
+
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini' : t('simulation');
 
   return (
     <div className="app-shell">
@@ -773,10 +781,10 @@ export default function App() {
         </div>
 
         <div className="topbar-actions">
-          {/* Ollama status badge */}
-          <div className={`ollama-badge ${ollamaCfg.enabled ? 'ok' : 'sim'} hide-mobile`}>
+          {/* AI status badge */}
+          <div className={`ollama-badge ${aiCfg.engine === 'gemini' ? 'ok' : 'sim'} hide-mobile`}>
             <span className="dot" />
-            {ollamaCfg.enabled ? `🤖 ${ollamaCfg.model}` : t('simulation')}
+            {engineLabel}
           </div>
 
           {/* Language toggle */}
@@ -811,7 +819,7 @@ export default function App() {
           activeTab={activeTab} setActiveTab={setActiveTab}
           activeModule={activeModule} setActiveModule={setActiveModule}
           voiceAgent={voiceAgent} setVoiceAgent={setVoiceAgent}
-          ollamaCfg={ollamaCfg}
+          aiCfg={aiCfg}
         />
         <main className="main-content">
           {renderMain()}

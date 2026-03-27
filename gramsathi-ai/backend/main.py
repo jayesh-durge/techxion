@@ -4,7 +4,7 @@ Local server: SQLite history + Rule-based NLP + Ollama LLM + edge-tts Neural TTS
 Run: python main.py
 """
 
-from fastapi import FastAPI, HTTPException, Query as QParam
+from fastapi import FastAPI, HTTPException, Query as QParam, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
@@ -327,7 +327,7 @@ def find_answer(query: str, module: str, lang: str = "hi") -> dict:
               "कृपया अधिक विस्तार से पूछें या नजदीकी कृषि/स्वास्थ्य केंद्र जाएं।",
         "mr": "माफ करा, या प्रश्नाचे उत्तर मला सापडले नाही। "
               "कृपया अधिक तपशीलवार विचारा किंवा जवळच्या केंद्राशी संपर्क करा।",
-        "en": "Sorry, I couldn't find an exact answer. "
+              "en": "Sorry, I couldn't find an exact answer. "
               "Please ask in more detail or visit your nearest agriculture/health center.",
     }
     return {"text": fallback.get(lang, fallback["hi"]), "sources": []}
@@ -337,33 +337,28 @@ class QueryRequest(BaseModel):
     query: str
     module: str = "health"
     language: str = "hi"
-    use_ollama: bool = False
-    ollama_url: Optional[str] = None
-    ollama_model: Optional[str] = None
+    ai_engine: str = "gemini" # 'gemini' or 'local'
+    gemini_key: Optional[str] = None
 
-# ── Ollama LLM ───────────────────────────────────────────────
-async def call_ollama(prompt: str, url: str, model: str) -> str:
+# ── Gemini API ───────────────────────────────────────────────
+async def call_gemini(prompt: str, api_key: str) -> str:
     import httpx
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            res = await client.post(
-                f"{url.rstrip('/')}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.35,
-                        "num_predict": 400,
-                        "top_p": 0.9,
-                        "repeat_penalty": 1.1,
-                    }
-                }
-            )
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.35,
+                "maxOutputTokens": 2048
+            }
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            res = await client.post(url, json=payload)
             res.raise_for_status()
-            return res.json().get("response", "").strip()
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Ollama error: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Gemini error: {str(e)}")
 
 def build_rural_prompt(query: str, module: str, lang: str, context: str) -> str:
     lang_labels = {"hi": "हिंदी (Hindi)", "mr": "मराठी (Marathi)", "en": "English"}
@@ -416,19 +411,23 @@ async def process_query(req: QueryRequest):
 
     # Always get local context
     local = find_answer(q, req.module, req.language)
+    prompt = build_rural_prompt(q, req.module, req.language, local["text"])
 
-    if req.use_ollama:
-        ollama_url   = (req.ollama_url or OLLAMA_URL).rstrip("/")
-        ollama_model = req.ollama_model or OLLAMA_MODEL
-        prompt = build_rural_prompt(q, req.module, req.language, local["text"])
-        try:
-            response_text = await call_ollama(prompt, ollama_url, ollama_model)
-            sources = local["sources"]
-        except Exception as e:
-            # Graceful fallback to local KB
+    if req.ai_engine == "gemini":
+        gemini_key = req.gemini_key or os.getenv("GEMINI_API_KEY")
+        if gemini_key:
+            try:
+                response_text = await call_gemini(prompt, gemini_key)
+                sources = local["sources"] + ["Google Gemini"]
+            except Exception as e:
+                print(f"Gemini call failed: {e}")
+                response_text = local["text"]
+                sources = local["sources"]
+        else:
             response_text = local["text"]
             sources = local["sources"]
-    else:
+
+    else: # local AI rules fallback
         response_text = local["text"]
         sources = local["sources"]
 
@@ -448,9 +447,9 @@ async def process_query(req: QueryRequest):
         "module": req.module,
         "language": req.language,
         "sources": sources,
-        "privacy": "on-device",
-        "cloud_calls": 0,
-        "mode": "ollama" if req.use_ollama else "local",
+        "privacy": "cloud" if req.ai_engine == "gemini" else "on-device",
+        "cloud_calls": 1 if req.ai_engine == "gemini" else 0,
+        "mode": req.ai_engine,
     }
 
 @app.get("/api/tts")
@@ -460,44 +459,69 @@ async def text_to_speech(
     gender: str = QParam("female"),
 ):
     """
-    Generate natural speech using Microsoft Neural TTS via edge-tts.
-    Voices: hi-IN-SwaraNeural (natural Hindi female), mr-IN-AarohiNeural, en-IN-NeerjaNeural
+    Generate fast, robust speech using Google TTS (gTTS).
     """
     try:
-        import edge_tts
+        from gtts import gTTS
+        import io
 
-        voice_map = {
-            ("hi", "female"): "hi-IN-SwaraNeural",
-            ("hi", "male"):   "hi-IN-MadhurNeural",
-            ("mr", "female"): "mr-IN-AarohiNeural",
-            ("mr", "male"):   "mr-IN-ManoharNeural",
-            ("en", "female"): "en-IN-NeerjaNeural",
-            ("en", "male"):   "en-IN-PrabhatNeural",
-        }
-        voice = voice_map.get((lang, gender), "hi-IN-SwaraNeural")
-
-        # Clean text
+        # Clean text: remove markdown and emojis
         clean = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-        clean = re.sub(r'[|#`>]', '', clean)
+        clean = re.sub(r'[^\w\s\.,!\?।\u0900-\u097F-]', '', clean)
         clean = re.sub(r'\n+', '. ', clean)
-        clean = re.sub(r'\s+', ' ', clean).strip()[:600]
+        clean = re.sub(r'\s+', ' ', clean).strip()
 
-        audio_chunks = []
-        communicate = edge_tts.Communicate(clean, voice, rate="-8%", pitch="+3Hz")
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_chunks.append(chunk["data"])
+        if not clean:
+            clean = "नमस्कार"
 
-        audio_data = b"".join(audio_chunks)
+        target_lang = "hi"
+        if lang.startswith("mr"): target_lang = "mr"
+        elif lang.startswith("en"): target_lang = "en"
+
+        # Generate audio directly into memory buffer
+        tts = gTTS(text=clean, lang=target_lang, slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        audio_data = fp.getvalue()
+
         return Response(
             content=audio_data,
             media_type="audio/mpeg",
             headers={"Cache-Control": "no-cache", "Content-Length": str(len(audio_data))}
         )
-    except ImportError:
-        raise HTTPException(status_code=503, detail="edge-tts not installed: pip install edge-tts")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
+
+@app.post("/api/stt")
+async def speech_to_text(file: UploadFile = File(...)):
+    """
+    Convert speech to text using Sarvam AI saaras:v3 model.
+    """
+    try:
+        from sarvamai import SarvamAI
+        # Save uploaded audio file to disk temporarily
+        audio_path = f"temp_{file.filename or 'audio.wav'}"
+        with open(audio_path, "wb") as f:
+            f.write(await file.read())
+
+        # Initialize SarvamAI client
+        client = SarvamAI(api_subscription_key="sk_2786h1fq_bilWDuNt36Z0sApfaRzCFZe4")
+        
+        # Transcribe audio
+        response = client.speech_to_text.transcribe(
+            file=open(audio_path, "rb"),
+            model="saaras:v3",
+            mode="transcribe"
+        )
+        # response should be a string or object containing transcribed text
+        # Fallback cleanup logic
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+            
+        # The user provided example shows print(response) directly outputs the string
+        return {"text": str(response).strip()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"STT error: {str(e)}")
 
 @app.get("/api/history")
 def get_history(limit: int = 50, module: Optional[str] = None):

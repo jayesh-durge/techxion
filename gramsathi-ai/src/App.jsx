@@ -88,21 +88,27 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) 
   const audioRef = useRef(null);
   const speakBackend = useCallback(async (text, idx) => {
     try {
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      if (audioRef.current) { 
+        audioRef.current.pause(); 
+        audioRef.current.currentTime = 0;
+        audioRef.current = null; 
+      }
+      setSpeaking(idx); // Force UI update immediately
+
       const gender = VOICE_AGENTS[voiceAgent]?.genderPref === 'female' ? 'female' : 'male';
       const url = `/api/tts?text=${encodeURIComponent(text.substring(0, 550))}&lang=${lang}&gender=${gender}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (!res.ok) throw new Error('TTS backend unavailable');
-      const blob = await res.blob();
-      const audio = new Audio(URL.createObjectURL(blob));
+      
+      // We directly pass the URL so the browser can incredibly stream the MP3 instantly!
+      const audio = new Audio(url);
       audioRef.current = audio;
-      setSpeaking(idx);
+      
       audio.onended = () => setSpeaking(null);
-      audio.onerror = () => { setSpeaking(null); speakWithAgent(text, voices, lang, voiceAgent, () => setSpeaking(idx), () => setSpeaking(null)); };
-      audio.play();
-    } catch {
-      // Fallback to browser synthesis
-      speakWithAgent(text, voices, lang, voiceAgent, () => setSpeaking(idx), () => setSpeaking(null));
+      audio.onerror = () => setSpeaking(null);
+      
+      await audio.play();
+    } catch (err) {
+      console.warn("TTS Playback issue:", err);
+      setSpeaking(null); // Unstick UI guaranteed
     }
   }, [lang, voiceAgent, voices]);
 
@@ -161,7 +167,7 @@ function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) 
 
   const sugg = mod.suggested[lang] || mod.suggested.hi;
   const modColor = `var(--${moduleId === 'edu' ? 'edu' : moduleId === 'health' ? 'health' : moduleId === 'govt' ? 'govt' : 'farm'})`;
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini' : t('simulation');
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : t('simulation');
 
   return (
     <div className="module-screen">
@@ -265,41 +271,24 @@ function ChatInputRow({ input, setInput, onSend, lang, t, thinking, onExtMicResu
   const [recording, setRecording] = useState(false);
   const recRef = useRef(null);
 
-  const startRec = async () => {
+  const startRec = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert(t('noSpeechSupport') || 'Speech not supported on this browser.'); return; }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      const chunks = [];
-      rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      rec.onstop = async () => {
-        setRecording(false);
-        stream.getTracks().forEach(t => t.stop());
-        try {
-          setInput(t('recordingPlaceholder') + ' (Transcribing...)');
-          const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-          const formData = new FormData();
-          formData.append('file', blob, 'audio.webm');
-          const res = await fetch('/api/stt', { method: 'POST', body: formData });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.text) {
-              setInput(data.text);
-              onExtMicResult?.(data.text);
-            } else setInput('');
-          } else {
-             setInput('');
-             alert("STT API Error");
-          }
-        } catch (e) {
-          setInput('');
-          alert("Transcription failed: " + e.message);
-        }
+      const r = new SR();
+      r.lang = LANG_CODES[lang] || 'hi-IN';
+      r.onstart  = () => setRecording(true);
+      r.onend    = () => setRecording(false);
+      r.onerror  = (e) => { setRecording(false); console.warn('STT Error', e); };
+      r.onresult = (e) => {
+        const txt = e.results[0][0].transcript;
+        setInput(txt);
+        onExtMicResult?.(txt);
       };
-      rec.start();
-      setRecording(true);
-      recRef.current = rec;
-    } catch (err) {
-      alert("Microphone access denied or unavailable.");
+      r.start();
+      recRef.current = r;
+    } catch (e) {
+      alert("Microphone denied or blocked.");
     }
   };
 
@@ -507,7 +496,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
     try {
       const res = await fetch('/health', { signal: AbortSignal.timeout(3000) });
       const ttsStatus = res.ok ? '✅ Neural TTS ready' : '⚠️ TTS unavailable';
-      const geminiStatus = form.geminiKey ? '✨ Gemini key provided' : '⚪ No Gemini key';
+      const geminiStatus = form.geminiKey ? '✨ Cloud Key Authorized' : '⚪ Cloud Key Missing';
       setTestResult({ ok: true, msg: `${geminiStatus}\n${ttsStatus}` });
     } catch (e) {
       setTestResult({ ok: false, msg: `${t('connectFail')}: ${e.message}` });
@@ -523,7 +512,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
   };
 
   const testSpeak = async (agentId) => {
-    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे.', en: 'Hello! I am GramSathi AI, testing Sarvam voice.' };
+    const demo = { hi: 'नमस्ते! मैं ग्राम साथी AI हूं।', mr: 'नमस्कार! मी ग्राम साथी AI आहे.', en: 'Hello! I am GramSathi AI.' };
     const text = demo[lang] || demo.hi;
     try {
       const gender = VOICE_AGENTS[agentId]?.genderPref === 'female' ? 'female' : 'male';
@@ -547,13 +536,13 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
             <label className="sc-label" style={{ marginBottom: 10 }}>Select Primary Engine</label>
             <div className="lang-group" style={{ marginBottom: 16 }}>
               <button className={`lang-pill ${form.engine === 'local' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'local' }))}>Local</button>
-              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>Gemini API</button>
+              <button className={`lang-pill ${form.engine === 'gemini' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, engine: 'gemini' }))}>GramSathi Cloud</button>
             </div>
           </div>
 
           {form.engine === 'gemini' && (
             <div className="sc-row" style={{ flexDirection: 'column', alignItems: 'stretch', marginBottom: 16 }}>
-              <label className="sc-label" style={{ marginBottom: 6 }}>✨ Gemini API Key</label>
+              <label className="sc-label" style={{ marginBottom: 6 }}>✨ GramSathi Cloud API Key</label>
               <input 
                 type="password" 
                 className="sc-input" 
@@ -623,7 +612,7 @@ function SettingsScreen({ lang, t, aiCfg, setAiCfg, voiceAgent, setVoiceAgent, v
    SIDEBAR (desktop only)
 ═══════════════════════════════════════════════════════════════════ */
 function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModule, voiceAgent, setVoiceAgent, aiCfg }) {
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini API' : 'Local Simulated AI';
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : 'Local Simulated AI';
   return (
     <aside className="sidebar">
       {/* Nav */}
@@ -748,6 +737,7 @@ export default function App() {
     if (activeModule && activeTab === 'module') {
       return (
           <ModuleScreen
+          key={activeModule}
           moduleId={activeModule}
           lang={lang}
           t={t}
@@ -765,7 +755,7 @@ export default function App() {
     return null;
   };
 
-  const engineLabel = aiCfg.engine === 'gemini' ? '✨ Gemini' : t('simulation');
+  const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : t('simulation');
 
   return (
     <div className="app-shell">

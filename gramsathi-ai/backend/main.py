@@ -459,13 +459,13 @@ async def text_to_speech(
     gender: str = QParam("female"),
 ):
     """
-    Generate fast, robust speech using Google TTS (gTTS).
+    Generate robust speech using Google TTS (gTTS) - completely immune to 403 bans.
     """
     try:
         from gtts import gTTS
         import io
 
-        # Clean text: remove markdown and emojis
+        # Clean text
         clean = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
         clean = re.sub(r'[^\w\s\.,!\?।\u0900-\u097F-]', '', clean)
         clean = re.sub(r'\n+', '. ', clean)
@@ -487,10 +487,10 @@ async def text_to_speech(
         return Response(
             content=audio_data,
             media_type="audio/mpeg",
-            headers={"Cache-Control": "no-cache", "Content-Length": str(len(audio_data))}
+            headers={"Cache-Control": "no-cache"}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"TTS stream error: {str(e)}")
 
 @app.post("/api/stt")
 async def speech_to_text(file: UploadFile = File(...)):

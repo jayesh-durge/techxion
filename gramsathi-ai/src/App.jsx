@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import Lenis from 'lenis';
 import { I18N, translate } from './i18n.js';
 import { VOICE_AGENTS, loadVoices, speakWithAgent } from './voiceAgents.js';
 import { MODULES, findAnswer }  from './data/knowledge.js';
@@ -71,7 +72,32 @@ function Toggle({ checked, onChange }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════
+/* ── Page Transition Wrapper ────────────────────────────────────── */
+function PageTransition({ children, pageKey }) {
+  const [displayKey, setDisplayKey] = useState(pageKey);
+  const [content, setContent] = useState(children);
+  const [cls, setCls] = useState('page-enter');
+
+  useEffect(() => {
+    if (pageKey === displayKey) return;
+    setCls('page-exit');
+    const t1 = setTimeout(() => {
+      setDisplayKey(pageKey);
+      setContent(children);
+      setCls('page-enter');
+    }, 180);
+    return () => clearTimeout(t1);
+  }, [pageKey]);
+
+  // Update content while same key (e.g. lang change)
+  useEffect(() => {
+    if (pageKey === displayKey) setContent(children);
+  }, [children]);
+
+  return <div className={`page-wrap ${cls}`}>{content}</div>;
+}
+
+/* ══════════════════════════════════════════════════════════════════
    MODULE CHAT SCREEN
 ═══════════════════════════════════════════════════════════════════ */
 function ModuleScreen({ moduleId, lang, t, onBack, voices, voiceAgent, aiCfg }) {
@@ -716,27 +742,7 @@ function Sidebar({ lang, t, activeTab, setActiveTab, activeModule, setActiveModu
           </div>
         </div>
 
-        <div className="sidebar-divider" />
-
-        {/* Voice agent picker */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">{t('voiceAgentLabel')}</div>
-          <div className="voice-agent-grid">
-            {Object.values(VOICE_AGENTS).map(ag => (
-              <div
-                key={ag.id}
-                className={`va-card ${voiceAgent === ag.id ? 'active' : ''}`}
-                onClick={() => { setVoiceAgent(ag.id); lsSet('gram_voice', ag.id); }}
-              >
-                <div className="va-emoji">{ag.emoji}</div>
-                <div className="va-name">{ag.name[lang] || ag.name.hi}</div>
-                <div className="va-desc">{ag.desc[lang] || ag.desc.hi}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* AI Status Hidden */}
+        {/* Voice agent picker is restricted uniquely to SettingsScreen */}        {/* AI Status Hidden */}
       </div>
     </aside>
   );
@@ -810,6 +816,7 @@ export default function App() {
     return null;
   };
 
+  const pageKey = activeModule ? `module-${activeModule}` : activeTab;
   const engineLabel = aiCfg.engine === 'gemini' ? '✨ GramSathi Cloud' : t('simulation');
 
   return (
@@ -817,7 +824,6 @@ export default function App() {
       {/* ── Topbar ── */}
       <header className="topbar">
         <div className="topbar-brand">
-          {activeModule && <button className="icon-btn hide-desktop" style={{ marginRight:4 }} onClick={handleBack}>←</button>}
           <div className="brand-logo">🌿</div>
           <div className="brand-text">
             <div className="brand-name">{t('appName')}</div>
@@ -846,13 +852,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Privacy bar ── */}
-      <div className="privacy-bar">
-        <span>🔒</span>
-        <span>{t('privacy')}</span>
-        <span>{t('cloud')}</span>
-      </div>
-
       {/* ── Body: Sidebar + Main ── */}
       <div className="content-area">
         <Sidebar
@@ -863,7 +862,9 @@ export default function App() {
           aiCfg={aiCfg}
         />
         <main className="main-content">
-          {renderMain()}
+          <PageTransition pageKey={pageKey}>
+            {renderMain()}
+          </PageTransition>
         </main>
       </div>
 
